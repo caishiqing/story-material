@@ -1,0 +1,7 @@
+sentence-transformers
+pymilvus
+pydub
+pydantic
+fastapi
+uvicorn
+loguru
