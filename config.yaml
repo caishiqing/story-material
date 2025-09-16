@@ -1,0 +1,12 @@
+# Milvus Database Configuration
+milvus:
+  host: "localhost"        # MILVUS_HOST - Milvus server host
+  port: 19530             # MILVUS_PORT - Milvus server port  
+  database: "story"        # MILVUS_DB - Database name
+  collection: "audio"      # MILVUS_COLLECTION - Collection name for audio materials
+
+# Embedding Model Configuration
+embedding:
+  model_path: "models/multilingual-e5-large-instruct"  # EMBEDDING_MODEL_PATH - Local model path or HuggingFace model name
+  device: "cpu"           # EMBEDDING_DEVICE - Compute device (auto|cpu|cuda|mps)
+  dimensions: 1024         # Vector dimensions for the embedding model

@@ -316,7 +316,8 @@ class CollectionStats(BaseModel):
     """Collection statistics model"""
 
     collection_name: str = Field(..., description="Collection name")
-    total_entities: int = Field(..., description="Total number of entities")
+    total_count: int = Field(..., description="Total number of entities")
+    type_counts: Dict[str, int] = Field(..., description="Count by audio type")
     schema: Dict[str, Dict[str, Any]] = Field(..., description="Schema information")
 
 

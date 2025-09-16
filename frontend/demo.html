@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>音效管理系统 - 演示页面</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            line-height: 1.6;
+            margin: 0;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            padding: 2rem;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+        .demo-section {
+            margin: 2rem 0;
+            padding: 1.5rem;
+            background: #f8f9fa;
+            border-radius: 8px;
+            border-left: 4px solid #007bff;
+        }
+        .demo-section h2 {
+            color: #007bff;
+            margin-top: 0;
+        }
+        .btn {
+            display: inline-block;
+            padding: 12px 24px;
+            background: #007bff;
+            color: white;
+            text-decoration: none;
+            border-radius: 6px;
+            margin: 10px 10px 10px 0;
+            transition: background 0.2s;
+        }
+        .btn:hover {
+            background: #0056b3;
+        }
+        .btn-secondary {
+            background: #6c757d;
+        }
+        .btn-secondary:hover {
+            background: #545b62;
+        }
+        .status {
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+        .status.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f1aeb5;
+        }
+        .status.info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #b8daff;
+        }
+        pre {
+            background: #f8f9fa;
+            padding: 1rem;
+            border-radius: 4px;
+            overflow-x: auto;
+            border-left: 3px solid #007bff;
+        }
+        .feature-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1rem;
+            margin: 1rem 0;
+        }
+        .feature-card {
+            background: white;
+            padding: 1rem;
+            border-radius: 6px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .feature-card h3 {
+            color: #007bff;
+            margin-top: 0;
+        }
+        @media (max-width: 768px) {
+            .container {
+                margin: 10px;
+                padding: 1rem;
+            }
+            .btn {
+                display: block;
+                text-align: center;
+                margin: 10px 0;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎵素材管理系统</h1>
+        
+        <div class="demo-section">
+            <h2>系统状态检查</h2>
+            <p>在使用前，请确认后端服务和前端都已正确启动：</p>
+            <div id="statusCheck">
+                <div class="status info">正在检查系统状态...</div>
+            </div>
+            <button onclick="checkStatus()" class="btn">重新检查</button>
+        </div>
+
+        <div class="demo-section">
+            <h2>🚀 快速开始</h2>
+            <p>选择您的启动方式：</p>
+            
+            <a href="index.html" class="btn">
+                📱 启动完整应用
+            </a>
+            
+            <button onclick="openInNewWindow()" class="btn btn-secondary">
+                🖥️ 在新窗口中打开
+            </button>
+        </div>
+
+        <div class="demo-section">
+            <h2>✨ 功能特性</h2>
+            <div class="feature-list">
+                <div class="feature-card">
+                    <h3>🎵 音效管理</h3>
+                    <p>上传、编辑、删除音效文件，支持多种音频格式</p>
+                </div>
+                <div class="feature-card">
+                    <h3>🔍 智能搜索</h3>
+                    <p>基于语义的智能搜索和多维度筛选</p>
+                </div>
+                <div class="feature-card">
+                    <h3>🎧 在线试听</h3>
+                    <p>内置音频播放器，支持在线试听</p>
+                </div>
+                <div class="feature-card">
+                    <h3>📊 数据统计</h3>
+                    <p>实时统计和可视化数据展示</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="demo-section">
+            <h2>🛠️ 技术架构</h2>
+            <p><strong>前端技术栈：</strong></p>
+            <ul>
+                <li>原生 JavaScript (ES6+)</li>
+                <li>CSS3 + Flexbox + Grid</li>
+                <li>Font Awesome 图标</li>
+                <li>响应式设计</li>
+            </ul>
+            
+            <p><strong>后端技术栈：</strong></p>
+            <ul>
+                <li>FastAPI + Python</li>
+                <li>Milvus 向量数据库</li>
+                <li>语义搜索引擎</li>
+                <li>RESTful API</li>
+            </ul>
+        </div>
+
+        <div class="demo-section">
+            <h2>📋 使用说明</h2>
+            <ol>
+                <li><strong>启动后端服务：</strong>确保运行在 http://localhost:8000</li>
+                <li><strong>打开前端应用：</strong>点击上方"启动完整应用"按钮</li>
+                <li><strong>上传音效：</strong>点击"上传音效"按钮，选择音频文件</li>
+                <li><strong>管理音效：</strong>使用搜索、筛选、编辑、删除等功能</li>
+                <li><strong>试听音效：</strong>点击播放按钮在线试听</li>
+            </ol>
+        </div>
+
+        <div class="demo-section">
+            <h2>🔗 API 端点</h2>
+            <p>后端提供的主要 API 端点：</p>
+            <pre id="apiList">加载中...</pre>
+        </div>
+
+        <div class="demo-section">
+            <h2>❓ 常见问题</h2>
+            <details>
+                <summary><strong>无法上传文件？</strong></summary>
+                <p>请检查文件格式是否支持（MP3, WAV, OGG, FLAC, M4A, AAC, WMA），文件大小不能超过100MB。</p>
+            </details>
+            
+            <details>
+                <summary><strong>搜索功能不工作？</strong></summary>
+                <p>请确认后端服务正常运行，并检查网络连接。</p>
+            </details>
+            
+            <details>
+                <summary><strong>音频无法播放？</strong></summary>
+                <p>请检查浏览器是否支持该音频格式，或者后端静态文件服务是否正确配置。</p>
+            </details>
+        </div>
+    </div>
+
+    <script>
+        async function checkStatus() {
+            const statusDiv = document.getElementById('statusCheck');
+            statusDiv.innerHTML = '<div class="status info">正在检查系统状态...</div>';
+
+            try {
+                // Check backend health
+                const response = await fetch('http://localhost:8000/health');
+                const health = await response.json();
+                
+                if (health.status === 'healthy') {
+                    statusDiv.innerHTML = `
+                        <div class="status success">
+                            ✅ 后端服务运行正常<br>
+                            服务：${health.service}
+                        </div>
+                        <div class="status success">
+                            ✅ 前端页面加载正常
+                        </div>
+                        <div class="status info">
+                            💡 系统已就绪，可以开始使用！
+                        </div>
+                    `;
+                    
+                    // Load API list
+                    loadApiList();
+                } else {
+                    throw new Error('Backend unhealthy');
+                }
+                
+            } catch (error) {
+                statusDiv.innerHTML = `
+                    <div class="status error">
+                        ❌ 无法连接到后端服务<br>
+                        请确保后端服务运行在 http://localhost:8000
+                    </div>
+                    <div class="status info">
+                        💡 启动后端服务：<code>python server.py</code>
+                    </div>
+                `;
+                
+                document.getElementById('apiList').textContent = '后端服务未启动，无法加载API列表';
+            }
+        }
+
+        async function loadApiList() {
+            try {
+                const response = await fetch('http://localhost:8000/');
+                const info = await response.json();
+                
+                const apiList = `
+GET  /                      - 服务信息
+GET  /health               - 健康检查
+POST /audio                - 上传音效文件
+GET  /audio                - 获取所有音效
+GET  /audio/{id}           - 获取单个音效
+PUT  /audio/{id}           - 更新音效
+DELETE /audio/{id}         - 删除音效
+POST /audio/search         - 搜索音效
+GET  /audio/stats          - 获取统计信息
+GET  /audio/types          - 获取音效类型
+GET  /static/data/*        - 静态文件服务
+                `;
+                
+                document.getElementById('apiList').textContent = apiList;
+                
+            } catch (error) {
+                document.getElementById('apiList').textContent = 'API 列表加载失败';
+            }
+        }
+
+        function openInNewWindow() {
+            window.open('index.html', '_blank', 'width=1200,height=800');
+        }
+
+        // Auto check status on page load
+        window.addEventListener('load', checkStatus);
+    </script>
+</body>
+</html>

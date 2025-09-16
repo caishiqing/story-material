@@ -3,12 +3,18 @@ FastAPI application for audio material management
 """
 
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException, Depends, status
+from fastapi import FastAPI, HTTPException, Depends, status, File, UploadFile, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from loguru import logger
 import os
-from typing import List, Optional
+import shutil
+import json
+import time
+import yaml
+from pathlib import Path
+from typing import List, Optional, Dict, Any
 
 from backend.models import (
     AudioType,
@@ -18,7 +24,7 @@ from backend.models import (
     AudioMaterialResponse,
     CollectionStats
 )
-from backend.audio_manager import AsyncAudioMaterialManager, create_audio_manager
+from backend.audio_manager import AsyncAudioMaterialManager
 from backend.embedding import EmbeddingService
 
 # Configure loguru
@@ -32,6 +38,20 @@ logger.add(
 # Global audio manager instance
 audio_manager: Optional[AsyncAudioMaterialManager] = None
 
+# Configuration loading function
+
+
+def load_config(config_path: str = "config.yaml") -> Dict[str, Any]:
+    """Load configuration from YAML file"""
+    if os.path.exists(config_path):
+        with open(config_path, 'r', encoding='utf-8') as f:
+            config = yaml.safe_load(f) or {}
+        logger.info(f"Loaded configuration from {config_path}")
+        return config
+    else:
+        logger.warning(f"Configuration file {config_path} not found, using defaults")
+        return {}
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -40,32 +60,30 @@ async def lifespan(app: FastAPI):
 
     # Startup
     logger.info("Starting up audio material management API...")
-    try:
-        # Create embedding service with configuration
-        embedding_device = os.getenv("EMBEDDING_DEVICE", "auto")
-        embedding_service = EmbeddingService(
-            model_path=os.getenv("EMBEDDING_MODEL_PATH", "multilingual-e5-large-instruct"),
-            device=None if embedding_device == "auto" else embedding_device
-        )
 
-        # Create and initialize audio manager
-        audio_manager = await create_audio_manager(
-            milvus_host=os.getenv("MILVUS_HOST", "localhost"),
-            milvus_port=int(os.getenv("MILVUS_PORT", "19530")),
-            collection_name=os.getenv("MILVUS_COLLECTION", "story-audio"),
-            embedding_service=embedding_service
-        )
-        logger.info("Audio manager initialized successfully")
-        yield
-    except Exception as e:
-        logger.error(f"Failed to initialize audio manager: {e}")
-        raise
-    finally:
-        # Shutdown
-        logger.info("Shutting down audio material management API...")
-        if audio_manager:
-            await audio_manager.disconnect()
-            logger.info("Audio manager disconnected")
+    # Load configuration from YAML file
+    config = load_config()
+
+    # Get embedding configuration
+    embedding_config = config.get("embedding", {})
+    embedding_service = EmbeddingService(
+        model_path=embedding_config.get("model_path"),
+        device=embedding_config.get("device")
+    )
+
+    # Get milvus configuration
+    milvus_config = config.get("milvus", {})
+    audio_manager = AsyncAudioMaterialManager(
+        milvus_host=milvus_config.get("host"),
+        milvus_port=milvus_config.get("port"),
+        db_name=milvus_config.get("database"),
+        collection_name=milvus_config.get("collection"),
+        embedding_service=embedding_service
+    )
+    await audio_manager.connect()
+    logger.info("Audio manager initialized successfully")
+
+    yield
 
 
 # Create FastAPI application
@@ -86,6 +104,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Mount static files for audio playback
+# Ensure the data directory exists
+os.makedirs("data/sound", exist_ok=True)
+app.mount("/static/data", StaticFiles(directory="data"), name="static")
 
 
 # Dependency to get audio manager
@@ -148,38 +171,207 @@ async def root():
     summary="Add new audio material"
 )
 async def add_audio(
-    audio_data: AudioMaterialCreate,
+    file: UploadFile = File(...),
+    audio_type: str = Form(...),
+    description: Optional[str] = Form(None),
+    tags: Optional[str] = Form(None),
     manager: AsyncAudioMaterialManager = Depends(get_audio_manager)
 ):
     """
-    Add a new audio material to the collection.
+    Upload and add a new audio material to the collection.
 
-    - **path**: Audio file path (required)
+    - **file**: Audio file to upload (required)
+    - **audio_type**: Audio effect type (required, must be one of: music, ambient, mood, action, transition)
     - **description**: Audio description (auto-generated from filename if not provided)
-    - **type**: Audio effect type (required, must be one of: music, ambient, mood, action, transition)
-    - **tags**: List of tags (optional)
-    - **duration**: Duration in seconds (auto-detected from file if not provided)
+    - **tags**: List of tags as JSON string (optional, e.g., '["tag1", "tag2"]')
 
     The system will automatically:
+    - Save file to data/sound/{type}/ directory
     - Generate description from filename if not provided
-    - Detect audio duration from file if not provided
+    - Detect audio duration from uploaded file
     - Validate duration based on audio type rules
     """
     try:
+        # Validate audio type
+        valid_types = [e.value for e in AudioType]
+        if audio_type not in valid_types:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid audio type. Must be one of: {valid_types}"
+            )
+
+        # Validate file type (basic check by extension)
+        if not file.filename:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="File name is required"
+            )
+
+        file_extension = Path(file.filename).suffix.lower()
+        valid_extensions = {'.mp3', '.wav', '.ogg', '.flac', '.m4a', '.aac', '.wma'}
+        if file_extension not in valid_extensions:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid audio file format. Supported formats: {', '.join(valid_extensions)}"
+            )
+
+        # Create target directory structure
+        base_dir = Path("data/sound")
+        type_dir = base_dir / audio_type
+        type_dir.mkdir(parents=True, exist_ok=True)
+
+        # Generate unique filename to avoid conflicts
+        timestamp = int(time.time())
+        safe_filename = f"{timestamp}_{file.filename}"
+        file_path = type_dir / safe_filename
+
+        # Save uploaded file
+        try:
+            with open(file_path, "wb") as buffer:
+                # Read file in chunks to handle large files
+                while chunk := await file.read(8192):  # 8KB chunks
+                    buffer.write(chunk)
+        except Exception as e:
+            logger.error(f"Failed to save file: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to save file: {str(e)}"
+            )
+
+        # Parse tags if provided
+        parsed_tags = None
+        if tags:
+            try:
+                parsed_tags = json.loads(tags) if tags.strip() else None
+            except json.JSONDecodeError:
+                # If not valid JSON, treat as comma-separated string
+                parsed_tags = [tag.strip() for tag in tags.split(",") if tag.strip()]
+
+        # Create audio material data using the saved file path
+        audio_data = AudioMaterialCreate(
+            path=str(file_path),
+            type=audio_type,
+            description=description,
+            tags=parsed_tags
+        )
+
+        # Add to the collection
         audio_id = await manager.add(audio_data)
+
         return {
-            "message": "Audio material added successfully",
+            "message": "Audio material uploaded and added successfully",
             "id": audio_id,
-            "path": audio_data.path
+            "filename": file.filename,
+            "path": str(file_path),
+            "type": audio_type
         }
+
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
     except Exception as e:
         logger.error(f"Failed to add audio material: {e}")
+        # Clean up file if it was saved but processing failed
+        if 'file_path' in locals() and file_path.exists():
+            try:
+                file_path.unlink()
+            except Exception as cleanup_error:
+                logger.warning(f"Failed to clean up file after error: {cleanup_error}")
+
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e)
         )
 
 
+# Specific routes first (before parameterized routes)
+@app.get(
+    "/audio/stats",
+    response_model=CollectionStats,
+    tags=["Statistics"],
+    summary="Get collection statistics"
+)
+async def get_stats(
+    manager: AsyncAudioMaterialManager = Depends(get_audio_manager)
+):
+    """Get statistics about the audio materials collection"""
+    try:
+        stats = await manager.check()
+        return stats
+    except Exception as e:
+        logger.error(f"Failed to get collection statistics: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to get collection statistics"
+        )
+
+
+@app.get(
+    "/audio/types",
+    response_model=List[str],
+    tags=["Reference"],
+    summary="Get available audio types"
+)
+async def get_audio_types():
+    """Get list of available audio types"""
+    return [audio_type.value for audio_type in AudioType]
+
+
+@app.post(
+    "/audio/search",
+    response_model=List[AudioMaterialResponse],
+    tags=["Search"],
+    summary="Hybrid search for audio materials"
+)
+async def search_audios(
+    search_params: AudioSearchParams,
+    manager: AsyncAudioMaterialManager = Depends(get_audio_manager)
+):
+    """
+    Perform hybrid search combining BM25 text search and semantic vector search.
+
+    - **query**: Search query text (required)
+    - **type**: Audio effect type filter (required)
+    - **tag**: Tag filter for partial matching (optional)
+    - **min_duration**: Minimum duration in seconds (optional)
+    - **max_duration**: Maximum duration in seconds (optional)
+    - **limit**: Maximum number of results (1-100, default: 10)
+
+    Results are ranked by hybrid relevance combining text similarity and semantic similarity.
+    """
+    try:
+        results = await manager.search(search_params)
+        return results
+    except Exception as e:
+        logger.error(f"Failed to search audio materials: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+
+
+@app.get(
+    "/audio",
+    response_model=List[AudioMaterialResponse],
+    tags=["Audio Materials"],
+    summary="List all audio materials"
+)
+async def list_audios(
+    manager: AsyncAudioMaterialManager = Depends(get_audio_manager)
+):
+    """List all audio materials in the collection"""
+    try:
+        audios = await manager.list()
+        return audios
+    except Exception as e:
+        logger.error(f"Failed to list audio materials: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to list audio materials"
+        )
+
+
+# Parameterized routes last
 @app.get(
     "/audio/{audio_id}",
     response_model=AudioMaterialResponse,
@@ -278,100 +470,13 @@ async def delete_audio(
         )
 
 
-@app.get(
-    "/audio",
-    response_model=List[AudioMaterialResponse],
-    tags=["Audio Materials"],
-    summary="List all audio materials"
-)
-async def list_audios(
-    manager: AsyncAudioMaterialManager = Depends(get_audio_manager)
-):
-    """List all audio materials in the collection"""
-    try:
-        audios = await manager.list()
-        return audios
-    except Exception as e:
-        logger.error(f"Failed to list audio materials: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to list audio materials"
-        )
-
-
-@app.post(
-    "/audio/search",
-    response_model=List[AudioMaterialResponse],
-    tags=["Search"],
-    summary="Hybrid search for audio materials"
-)
-async def search_audios(
-    search_params: AudioSearchParams,
-    manager: AsyncAudioMaterialManager = Depends(get_audio_manager)
-):
-    """
-    Perform hybrid search combining BM25 text search and semantic vector search.
-
-    - **query**: Search query text (required)
-    - **type**: Audio effect type filter (required)
-    - **tag**: Tag filter for partial matching (optional)
-    - **min_duration**: Minimum duration in seconds (optional)
-    - **max_duration**: Maximum duration in seconds (optional)
-    - **limit**: Maximum number of results (1-100, default: 10)
-
-    Results are ranked by hybrid relevance combining text similarity and semantic similarity.
-    """
-    try:
-        results = await manager.search(search_params)
-        return results
-    except Exception as e:
-        logger.error(f"Failed to search audio materials: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
-
-
-@app.get(
-    "/audio/stats",
-    response_model=CollectionStats,
-    tags=["Statistics"],
-    summary="Get collection statistics"
-)
-async def get_stats(
-    manager: AsyncAudioMaterialManager = Depends(get_audio_manager)
-):
-    """Get statistics about the audio materials collection"""
-    try:
-        stats = await manager.check()
-        return stats
-    except Exception as e:
-        logger.error(f"Failed to get collection statistics: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to get collection statistics"
-        )
-
-
-# Audio types endpoint for reference
-@app.get(
-    "/audio/types",
-    response_model=List[str],
-    tags=["Reference"],
-    summary="Get available audio types"
-)
-async def get_audio_types():
-    """Get list of available audio types"""
-    return [audio_type.value for audio_type in AudioType]
-
-
 if __name__ == "__main__":
     import uvicorn
     import sys
     import argparse
     from dotenv import load_dotenv
 
-    # Load environment variables as fallback
+    # Load environment variables as fallback (for backwards compatibility)
     load_dotenv()
 
     # Create argument parser
@@ -383,57 +488,33 @@ if __name__ == "__main__":
     # API server arguments
     parser.add_argument(
         "--host", "-H",
-        default=os.getenv("API_HOST", "0.0.0.0"),
+        default="0.0.0.0",
         help="Host to bind the server to"
     )
     parser.add_argument(
         "--port", "-p",
         type=int,
-        default=int(os.getenv("API_PORT", "8000")),
+        default=8000,
         help="Port to bind the server to"
     )
     parser.add_argument(
         "--reload", "-r",
         action="store_true",
-        default=os.getenv("API_RELOAD", "false").lower() == "true",
+        default=False,
         help="Enable auto-reload for development"
     )
     parser.add_argument(
         "--log-level", "-l",
         choices=["critical", "error", "warning", "info", "debug", "trace"],
-        default=os.getenv("LOG_LEVEL", "info").lower(),
+        default="info",
         help="Log level for the server"
     )
 
-    # Milvus configuration arguments
+    # Configuration file argument
     parser.add_argument(
-        "--milvus-host",
-        default=os.getenv("MILVUS_HOST", "localhost"),
-        help="Milvus server host"
-    )
-    parser.add_argument(
-        "--milvus-port",
-        type=int,
-        default=int(os.getenv("MILVUS_PORT", "19530")),
-        help="Milvus server port"
-    )
-    parser.add_argument(
-        "--milvus-collection",
-        default=os.getenv("MILVUS_COLLECTION", "story-audio"),
-        help="Milvus collection name"
-    )
-
-    # Embedding model configuration arguments
-    parser.add_argument(
-        "--embedding-model-path",
-        default=os.getenv("EMBEDDING_MODEL_PATH", "models/multilingual-e5-large-instruct"),
-        help="Path to the sentence-transformer model (local path or model name)"
-    )
-    parser.add_argument(
-        "--embedding-device",
-        choices=["auto", "cpu", "cuda", "mps"],
-        default=os.getenv("EMBEDDING_DEVICE", "auto"),
-        help="Device to run the embedding model on"
+        "--config", "-c",
+        default="config.yaml",
+        help="Path to configuration file (for Milvus and embedding settings)"
     )
 
     # Additional options
@@ -452,25 +533,25 @@ if __name__ == "__main__":
     # Parse arguments
     args = parser.parse_args()
 
-    # Update environment variables with parsed arguments
-    os.environ["MILVUS_HOST"] = args.milvus_host
-    os.environ["MILVUS_PORT"] = str(args.milvus_port)
-    os.environ["MILVUS_COLLECTION"] = args.milvus_collection
-    os.environ["EMBEDDING_MODEL_PATH"] = args.embedding_model_path
-    os.environ["EMBEDDING_DEVICE"] = args.embedding_device
+    # Load configuration from file
+    config = load_config(args.config)
+    milvus_config = config.get("milvus", {})
+    embedding_config = config.get("embedding", {})
 
     # Log startup information
     logger.info("Starting Audio Material Management API...")
+    logger.info(f"Configuration file: {args.config}")
     logger.info(f"Host: {args.host}")
     logger.info(f"Port: {args.port}")
     logger.info(f"Reload: {args.reload}")
     logger.info(f"Log Level: {args.log_level}")
     logger.info(f"Workers: {args.workers}")
     logger.info(f"Access Log: {not args.no_access_log}")
-    logger.info(f"Milvus: {args.milvus_host}:{args.milvus_port}")
-    logger.info(f"Collection: {args.milvus_collection}")
-    logger.info(f"Embedding Model Path: {args.embedding_model_path}")
-    logger.info(f"Embedding Device: {args.embedding_device}")
+    logger.info(f"Milvus: {milvus_config.get('host')}:{milvus_config.get('port')}")
+    logger.info(f"Database: {milvus_config.get('database')}")
+    logger.info(f"Collection: {milvus_config.get('collection')}")
+    logger.info(f"Embedding Model Path: {embedding_config.get('model_path')}")
+    logger.info(f"Embedding Device: {embedding_config.get('device')}")
 
     try:
         # Run the application

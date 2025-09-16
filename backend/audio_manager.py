@@ -7,6 +7,7 @@ from loguru import logger
 import asyncio
 from typing import List, Dict, Optional, Any, Union
 from pymilvus import AsyncMilvusClient, CollectionSchema, FieldSchema, DataType, Function, FunctionType
+from pymilvus.milvus_client.index import IndexParams
 import numpy as np
 from .embedding import EmbeddingService
 from .models import (
@@ -32,7 +33,8 @@ class AsyncAudioMaterialManager:
         self,
         milvus_host: str = "localhost",
         milvus_port: int = 19530,
-        collection_name: str = "story-audio",
+        db_name: str = "story",
+        collection_name: str = "audio",
         embedding_service: Optional[EmbeddingService] = None
     ):
         """
@@ -44,159 +46,100 @@ class AsyncAudioMaterialManager:
             collection_name: Name of the collection to manage
             embedding_service: EmbeddingService instance for vector generation
         """
-        self.milvus_host = milvus_host
-        self.milvus_port = milvus_port
-        self.milvus_uri = f"http://{milvus_host}:{milvus_port}"
+        self.db_name = db_name
         self.collection_name = collection_name
+        self.client = AsyncMilvusClient(uri=f"http://{milvus_host}:{milvus_port}")
         self.embedding_service = embedding_service or EmbeddingService()
-
-        # Setup logging (using loguru global logger)
-        # No need to create instance logger, use global logger
-
-        # Initialize async client (will be set in connect())
-        self.client: Optional[AsyncMilvusClient] = None
-        self._initialized = False
 
     async def connect(self):
         """Connect to Milvus server and initialize collection"""
-        if self._initialized:
-            return
+        dbs = await self.client.list_databases()
+        if self.db_name not in dbs:
+            await self.client.create_database(self.db_name)
 
-        try:
-            # Create async client
-            self.client = AsyncMilvusClient(uri=self.milvus_uri)
-            logger.info(f"Connected to Milvus at {self.milvus_uri}")
+        self.client.use_database(self.db_name)
 
-            # Initialize collection
-            await self._init_collection()
-            self._initialized = True
-
-        except Exception as e:
-            logger.error(f"Failed to connect to Milvus: {str(e)}")
-            raise
-
-    async def _init_collection(self):
-        """Initialize or load the audio collection"""
-        try:
-            # Check if collection exists
-            if await self.client.has_collection(collection_name=self.collection_name):
-                logger.info(f"Collection '{self.collection_name}' already exists")
-            else:
-                await self._create_collection()
-                logger.info(f"Created new collection: {self.collection_name}")
-        except Exception as e:
-            logger.error(f"Failed to initialize collection: {str(e)}")
-            raise
+        collections = await self.client.list_collections()
+        if self.collection_name not in collections:
+            await self._create_collection()
 
     async def _create_collection(self):
         """Create the audio collection with defined schema"""
-        try:
-            # Define fields
-            fields = [
-                FieldSchema(
-                    name="id",
-                    dtype=DataType.INT64,
-                    is_primary=True,
-                    auto_id=True
-                ),
-                FieldSchema(
-                    name="path",
-                    dtype=DataType.VARCHAR,
-                    max_length=512,
-                    description="Audio file path"
-                ),
-                FieldSchema(
-                    name="description",
-                    dtype=DataType.VARCHAR,
-                    max_length=2048,
-                    enable_analyzer=True,
-                    description="Audio description for BM25 indexing"
-                ),
-                FieldSchema(
-                    name="vector",
-                    dtype=DataType.FLOAT_VECTOR,
-                    dim=1024,
-                    description="Vector embedding of the audio description"
-                ),
-                FieldSchema(
-                    name="sparse_vector",
-                    dtype=DataType.SPARSE_FLOAT_VECTOR,
-                    description="Sparse vector for BM25 full-text search"
-                ),
-                FieldSchema(
-                    name="type",
-                    dtype=DataType.VARCHAR,
-                    max_length=128,
-                    description="Audio effect type"
-                ),
-                FieldSchema(
-                    name="tag",
-                    dtype=DataType.ARRAY,
-                    element_type=DataType.VARCHAR,
-                    max_capacity=50,
-                    max_length=64,
-                    nullable=True,
-                    description="Audio effect tags (nullable)"
-                ),
-                FieldSchema(
-                    name="duration",
-                    dtype=DataType.INT64,
-                    description="Audio duration in seconds"
-                )
-            ]
+        schema = AsyncMilvusClient.create_schema()
 
-            # Define BM25 function for full-text search
-            bm25_function = Function(
-                name="description_bm25_emb",
-                input_field_names=["description"],
-                output_field_names=["sparse_vector"],
-                function_type=FunctionType.BM25,
-            )
+        schema.add_field(field_name="id",
+                         datatype=DataType.INT64,
+                         is_primary=True,
+                         auto_id=True)
 
-            # Create collection schema
-            schema = CollectionSchema(
-                fields=fields,
-                description="Story audio material collection"
-            )
+        schema.add_field(field_name="path",
+                         datatype=DataType.VARCHAR,
+                         max_length=512)
 
-            # Add BM25 function to schema
-            schema.add_function(bm25_function)
+        schema.add_field(field_name="vector",
+                         datatype=DataType.FLOAT_VECTOR,
+                         dim=self.embedding_service.dimensions)
 
-            # Create collection using async client
-            await self.client.create_collection(
-                collection_name=self.collection_name,
-                schema=schema
-            )
+        schema.add_field(field_name="type",
+                         datatype=DataType.VARCHAR,
+                         max_length=128)
 
-            # Create index for dense vector field
-            dense_index_params = {
-                "metric_type": "COSINE",
-                "index_type": "IVF_FLAT",
-                "params": {"nlist": 128}
-            }
+        schema.add_field(field_name="duration",
+                         datatype=DataType.INT64)
 
-            await self.client.create_index(
-                collection_name=self.collection_name,
-                field_name="vector",
-                index_params=dense_index_params
-            )
+        schema.add_field(field_name="tag",
+                         datatype=DataType.ARRAY,
+                         element_type=DataType.VARCHAR,
+                         max_capacity=50,
+                         max_length=64,
+                         nullable=True)
 
-            # Create index for sparse vector field (BM25)
-            sparse_index_params = {
-                "metric_type": "BM25",
-                "index_type": "SPARSE_INVERTED_INDEX",
-                "params": {}
-            }
+        analyzer_params = {"type": "chinese"}
 
-            await self.client.create_index(
-                collection_name=self.collection_name,
-                field_name="sparse_vector",
-                index_params=sparse_index_params
-            )
+        schema.add_field(field_name="description",
+                         datatype=DataType.VARCHAR,
+                         max_length=2048,
+                         enable_analyzer=True,
+                         enable_match=True,
+                         analyzer_params=analyzer_params)
 
-        except Exception as e:
-            logger.error(f"Failed to create collection: {str(e)}")
-            raise
+        schema.add_field(field_name="sparse_vector",
+                         datatype=DataType.SPARSE_FLOAT_VECTOR)
+
+        # Define BM25 function for full-text search
+        bm25_function = Function(
+            name="description_bm25_emb",
+            input_field_names=["description"],
+            output_field_names=["sparse_vector"],
+            function_type=FunctionType.BM25,
+        )
+        schema.add_function(bm25_function)
+
+        # Create index for dense vector field
+        index_params = self.client.prepare_index_params()
+        index_params.add_index(
+            field_name="vector",
+            index_type="IVF_FLAT",
+            index_name="vector_index",
+            metric_type="L2",
+            params={"nlist": 64, "nprobe": 10}
+        )
+
+        # Create index for sparse vector field (BM25)
+        index_params.add_index(
+            field_name="sparse_vector",
+            index_type="SPARSE_INVERTED_INDEX",
+            index_name="sparse_vector_index",
+            metric_type="BM25",
+            params={}
+        )
+
+        # Create collection using async client
+        await self.client.create_collection(
+            collection_name=self.collection_name,
+            schema=schema,
+            index_params=index_params
+        )
 
     async def add(
         self,
@@ -211,45 +154,29 @@ class AsyncAudioMaterialManager:
         Returns:
             ID of the inserted record
         """
-        try:
-            # Ensure connection
-            if not self._initialized:
-                await self.connect()
+        # Convert dict to AudioMaterialCreate if needed (duration auto-detected in model)
+        if isinstance(audio_data, dict):
+            audio_data = AudioMaterialCreate(**audio_data)
 
-            # Convert dict to AudioMaterialCreate if needed (duration auto-detected in model)
-            if isinstance(audio_data, dict):
-                audio_data = AudioMaterialCreate(**audio_data)
+        # Generate vector embedding from description
+        vector = self.embedding_service.encode(audio_data.description)
 
-            # Generate vector embedding from description
-            vector = self.embedding_service.encode(audio_data.description)
+        # Prepare data for Milvus insertion
+        data = [{
+            "path": audio_data.path,
+            "description": audio_data.description,
+            "vector": vector.tolist(),
+            "type": audio_data.type,
+            "tag": audio_data.tags,
+            "duration": audio_data.duration
+        }]
 
-            # Prepare data for Milvus insertion
-            data = [{
-                "path": audio_data.path,
-                "description": audio_data.description,
-                "vector": vector.tolist(),
-                "type": audio_data.type,
-                "tag": audio_data.tags,
-                "duration": audio_data.duration
-            }]
+        result = await self.client.insert(self.collection_name, data=data)
 
-            # Insert data
-            result = await self.client.insert(
-                collection_name=self.collection_name,
-                data=data
-            )
+        inserted_id = result['insert_count']  # AsyncMilvusClient returns different format
+        logger.info(f"Successfully added audio material: {audio_data.path} (ID: {inserted_id})")
 
-            inserted_id = result['insert_count']  # AsyncMilvusClient returns different format
-            logger.info(f"Successfully added audio material: {audio_data.path} (ID: {inserted_id})")
-
-            return str(inserted_id)
-
-        except ValidationError as e:
-            logger.error(f"Invalid audio data: {str(e)}")
-            raise ValueError(f"Invalid audio data: {str(e)}")
-        except Exception as e:
-            logger.error(f"Failed to add audio material: {str(e)}")
-            raise
+        return str(inserted_id)
 
     async def delete(self, audio_id: Union[str, int]) -> bool:
         """
@@ -261,32 +188,22 @@ class AsyncAudioMaterialManager:
         Returns:
             True if deletion was successful
         """
-        try:
-            # Ensure connection
-            if not self._initialized:
-                await self.connect()
+        # Convert to int if string
+        if isinstance(audio_id, str):
+            audio_id = int(audio_id)
 
-            # Convert to int if string
-            if isinstance(audio_id, str):
-                audio_id = int(audio_id)
+        # Delete by primary key
+        result = await self.client.delete(
+            collection_name=self.collection_name,
+            ids=audio_id
+        )
 
-            # Delete by primary key
-            expr = f"id == {audio_id}"
-            result = await self.client.delete(
-                collection_name=self.collection_name,
-                filter=expr
-            )
-
-            if result['delete_count'] > 0:
-                logger.info(f"Successfully deleted audio material with ID: {audio_id}")
-                return True
-            else:
-                logger.warning(f"No audio material found with ID: {audio_id}")
-                return False
-
-        except Exception as e:
-            logger.error(f"Failed to delete audio material: {str(e)}")
-            raise
+        if result['delete_count'] > 0:
+            logger.info(f"Successfully deleted audio material with ID: {audio_id}")
+            return True
+        else:
+            logger.warning(f"No audio material found with ID: {audio_id}")
+            return False
 
     async def update(
         self,
@@ -303,82 +220,40 @@ class AsyncAudioMaterialManager:
         Returns:
             True if update was successful
         """
-        try:
-            # Ensure connection
-            if not self._initialized:
-                await self.connect()
+        # Validate and convert input data
+        if isinstance(update_data, AudioMaterialUpdate):
+            update_data = update_data.model_dump()
 
-            # Validate and convert input data
-            if isinstance(update_data, dict):
-                update_data = AudioMaterialUpdate(**update_data)
+        update_data["id"] = audio_id
 
-            # Convert to int if string
-            if isinstance(audio_id, str):
-                audio_id = int(audio_id)
+        existing_record = await self.client.query(
+            collection_name=self.collection_name,
+            ids=audio_id,
+            output_fields=["description", "vector"]
+        )
 
-            # First, get the existing record
-            expr = f"id == {audio_id}"
+        if not existing_record:
+            logger.warning(f"No audio material found with ID: {audio_id}")
+            return False
+        else:
+            existing_record = existing_record[0]
 
-            existing_records = await self.client.query(
-                collection_name=self.collection_name,
-                filter=expr,
-                output_fields=["id", "path", "description", "type", "tag", "duration"]
-            )
+        # Generate new vector if description changed
+        if update_data.get("description") is not None and update_data["description"] != existing_record["description"]:
+            vector = self.embedding_service.encode(update_data.description).tolist()
+            update_data["vector"] = vector
 
-            if not existing_records:
-                logger.warning(f"No audio material found with ID: {audio_id}")
-                return False
+        result = await self.client.upsert(
+            collection_name=self.collection_name,
+            data=update_data
+        )
 
-            # Convert existing record to response model
-            existing_audio = AudioMaterialResponse.from_milvus_result(existing_records[0])
-
-            # Merge update data with existing data using utility function
-            merged_audio = merge_update_data(existing_audio, update_data)
-
-            # Generate new vector if description changed
-            if update_data.description is not None:
-                vector = self.embedding_service.encode(merged_audio.description)
-                merged_audio.vector = vector.tolist()
-            else:
-                # Get existing vector
-                vector_records = await self.client.query(
-                    collection_name=self.collection_name,
-                    filter=expr,
-                    output_fields=["vector"]
-                )
-                merged_audio.vector = vector_records[0]["vector"]
-
-            # Delete old record
-            await self.client.delete(
-                collection_name=self.collection_name,
-                filter=expr
-            )
-
-            # Prepare data for insertion
-            insert_data = [{
-                "path": merged_audio.path,
-                "description": merged_audio.description,
-                "vector": merged_audio.vector,
-                "type": merged_audio.type,
-                "tag": merged_audio.tags,
-                "duration": merged_audio.duration
-            }]
-
-            # Insert updated record
-            await self.client.insert(
-                collection_name=self.collection_name,
-                data=insert_data
-            )
-
+        if result['upsert_count'] > 0:
             logger.info(f"Successfully updated audio material with ID: {audio_id}")
             return True
-
-        except ValidationError as e:
-            logger.error(f"Invalid update data: {str(e)}")
-            raise ValueError(f"Invalid update data: {str(e)}")
-        except Exception as e:
-            logger.error(f"Failed to update audio material: {str(e)}")
-            raise
+        else:
+            logger.warning(f"No audio material found with ID: {audio_id}")
+            return False
 
     async def get(self, audio_id: Union[str, int]) -> Optional[AudioMaterialResponse]:
         """
@@ -390,32 +265,21 @@ class AsyncAudioMaterialManager:
         Returns:
             AudioMaterialResponse instance or None if not found
         """
-        try:
-            # Ensure connection
-            if not self._initialized:
-                await self.connect()
+        # Convert to int if string
+        if isinstance(audio_id, str):
+            audio_id = int(audio_id)
 
-            # Convert to int if string
-            if isinstance(audio_id, str):
-                audio_id = int(audio_id)
+        records = await self.client.query(
+            collection_name=self.collection_name,
+            ids=audio_id,
+            output_fields=["id", "path", "description", "type", "tag", "duration"]
+        )
 
-            expr = f"id == {audio_id}"
-
-            records = await self.client.query(
-                collection_name=self.collection_name,
-                filter=expr,
-                output_fields=["id", "path", "description", "type", "tag", "duration"]
-            )
-
-            if records:
-                return AudioMaterialResponse.from_milvus_result(records[0])
-            else:
-                logger.warning(f"No audio material found with ID: {audio_id}")
-                return None
-
-        except Exception as e:
-            logger.error(f"Failed to get audio material: {str(e)}")
-            raise
+        if records:
+            return AudioMaterialResponse.from_milvus_result(records[0])
+        else:
+            logger.warning(f"No audio material found with ID: {audio_id}")
+            return None
 
     async def list(self) -> List[AudioMaterialResponse]:
         """
@@ -424,22 +288,13 @@ class AsyncAudioMaterialManager:
         Returns:
             List of AudioMaterialResponse instances
         """
-        try:
-            # Ensure connection
-            if not self._initialized:
-                await self.connect()
+        records = await self.client.query(
+            collection_name=self.collection_name,
+            output_fields=["id", "path", "description", "type", "tag", "duration"],
+            limit=1000
+        )
 
-            records = await self.client.query(
-                collection_name=self.collection_name,
-                filter="",  # Empty filter to get all records
-                output_fields=["id", "path", "description", "type", "tag", "duration"]
-            )
-
-            return [AudioMaterialResponse.from_milvus_result(record) for record in records]
-
-        except Exception as e:
-            logger.error(f"Failed to list audio materials: {str(e)}")
-            raise
+        return [AudioMaterialResponse.from_milvus_result(record) for record in records]
 
     async def check(self) -> CollectionStats:
         """
@@ -448,41 +303,44 @@ class AsyncAudioMaterialManager:
         Returns:
             CollectionStats instance
         """
-        try:
-            # Ensure connection
-            if not self._initialized:
-                await self.connect()
+        # Get collection info
+        collection_info = await self.client.describe_collection(
+            collection_name=self.collection_name
+        )
 
-            # Get collection info
-            collection_info = await self.client.describe_collection(
-                collection_name=self.collection_name
-            )
+        # Get entity count using proper query method
+        collection_stats = await self.client.get_collection_stats(
+            collection_name=self.collection_name
+        )
+        total_entities = collection_stats.get('row_count', 0)
 
-            # Get entity count
-            stats_result = await self.client.query(
-                collection_name=self.collection_name,
-                filter="",
-                output_fields=["count(*)"]
-            )
+        # Build schema info
+        schema_info = {}
+        for field in collection_info['fields']:
+            schema_info[field['name']] = {
+                "type": field['type'],
+                "description": field.get('description', '')
+            }
 
-            total_entities = len(stats_result) if stats_result else 0
+        # Get type counts
+        all_records = await self.client.query(
+            collection_name=self.collection_name,
+            output_fields=["type"],
+            limit=1000
+        )
 
-            # Build schema info
-            schema_info = {}
-            for field in collection_info['fields']:
-                schema_info[field['name']] = {
-                    "type": field['type'],
-                    "description": field.get('description', '')
-                }
+        # Count by type
+        type_counts = {}
+        for record in all_records:
+            audio_type = record.get('type', 'unknown')
+            type_counts[audio_type] = type_counts.get(audio_type, 0) + 1
 
-            return CollectionStats(
-                collection_name=self.collection_name,
-                total_entities=total_entities,
-                schema=schema_info
-            )
-        except Exception as e:
-            logger.error(f"Failed to get collection stats: {str(e)}")
-            raise
+        return CollectionStats(
+            collection_name=self.collection_name,
+            total_count=total_entities,
+            type_counts=type_counts,
+            schema=schema_info
+        )
 
     async def search(
         self,
@@ -497,73 +355,61 @@ class AsyncAudioMaterialManager:
         Returns:
             List of AudioMaterialResponse instances ranked by hybrid relevance
         """
-        try:
-            # Ensure connection
-            if not self._initialized:
-                await self.connect()
+        # Validate and convert input data
+        if isinstance(search_params, dict):
+            search_params = AudioSearchParams(**search_params)
 
-            # Validate and convert input data
-            if isinstance(search_params, dict):
-                search_params = AudioSearchParams(**search_params)
+        # Build filter expression
+        filter_expr = self._build_filter_expression(search_params)
+        logger.info(f"Filter expression: {filter_expr}")
 
-            # Build filter expression
-            filter_expr = self._build_filter_expression(search_params)
-            logger.info(f"Filter expression: {filter_expr}")
+        # Generate dense vector for semantic search
+        query_vector = self.embedding_service.encode(search_params.query)
 
-            # Generate dense vector for semantic search
-            query_vector = self.embedding_service.encode(search_params.query)
+        # Perform hybrid search using AsyncMilvusClient
+        search_results = await self.client.search(
+            collection_name=self.collection_name,
+            data=[search_params.query, query_vector.tolist()],
+            anns_field=["sparse_vector", "vector"],
+            limit=search_params.limit,
+            filter=filter_expr,  # Apply filtering
+            output_fields=["id", "path", "description", "type", "tag", "duration"],
+            search_params={
+                "sparse": {"params": {"drop_ratio_search": 0.2}},
+                "dense": {"params": {"nprobe": 10}}
+            }
+        )
 
-            # Perform hybrid search using AsyncMilvusClient
-            search_results = await self.client.search(
-                collection_name=self.collection_name,
-                data=[search_params.query, query_vector.tolist()],  # Text and vector for hybrid search
-                anns_field=["sparse_vector", "vector"],  # Search both fields
-                limit=search_params.limit,
-                filter=filter_expr,  # Apply filtering
-                output_fields=["id", "path", "description", "type", "tag", "duration"],
-                search_params={
-                    "sparse": {"params": {"drop_ratio_search": 0.2}},
-                    "dense": {"params": {"nprobe": 10}}
-                }
-            )
+        # Convert results to AudioMaterialResponse
+        responses = []
+        if search_results:
+            # Process search results
+            for result_group in search_results:
+                for hit in result_group:
+                    # Extract entity data
+                    entity_data = hit.get('entity', {})
+                    result_dict = {
+                        'id': hit.get('id'),
+                        'path': entity_data.get('path'),
+                        'description': entity_data.get('description'),
+                        'type': entity_data.get('type'),
+                        'tag': entity_data.get('tag'),
+                        'duration': entity_data.get('duration')
+                    }
+                    responses.append(AudioMaterialResponse.from_milvus_result(result_dict))
 
-            # Convert results to AudioMaterialResponse
-            responses = []
-            if search_results:
-                # Process search results
-                for result_group in search_results:
-                    for hit in result_group:
-                        # Extract entity data
-                        entity_data = hit.get('entity', {})
-                        result_dict = {
-                            'id': hit.get('id'),
-                            'path': entity_data.get('path'),
-                            'description': entity_data.get('description'),
-                            'type': entity_data.get('type'),
-                            'tag': entity_data.get('tag'),
-                            'duration': entity_data.get('duration')
-                        }
-                        responses.append(AudioMaterialResponse.from_milvus_result(result_dict))
+        # Remove duplicates and limit results
+        seen_ids = set()
+        unique_responses = []
+        for response in responses:
+            if response.id not in seen_ids:
+                seen_ids.add(response.id)
+                unique_responses.append(response)
 
-            # Remove duplicates and limit results
-            seen_ids = set()
-            unique_responses = []
-            for response in responses:
-                if response.id not in seen_ids:
-                    seen_ids.add(response.id)
-                    unique_responses.append(response)
+        final_responses = unique_responses[:search_params.limit]
 
-            final_responses = unique_responses[:search_params.limit]
-
-            logger.info(f"Hybrid search for '{search_params.query}' returned {len(final_responses)} results")
-            return final_responses
-
-        except ValidationError as e:
-            logger.error(f"Invalid search parameters: {str(e)}")
-            raise ValueError(f"Invalid search parameters: {str(e)}")
-        except Exception as e:
-            logger.error(f"Failed to perform hybrid search: {str(e)}")
-            raise
+        logger.info(f"Hybrid search for '{search_params.query}' returned {len(final_responses)} results")
+        return final_responses
 
     def _build_filter_expression(self, search_params: AudioSearchParams) -> str:
         """
@@ -599,41 +445,7 @@ class AsyncAudioMaterialManager:
 
     async def disconnect(self):
         """Disconnect from Milvus"""
-        try:
-            if self.client:
-                await self.client.close()
-                self.client = None
-                self._initialized = False
-                logger.info("Disconnected from Milvus")
-        except Exception as e:
-            logger.error(f"Failed to disconnect from Milvus: {str(e)}")
-
-
-# Factory function
-async def create_audio_manager(
-    milvus_host: str = "localhost",
-    milvus_port: int = 19530,
-    collection_name: str = "story-audio",
-    embedding_service: Optional[EmbeddingService] = None
-) -> AsyncAudioMaterialManager:
-    """
-    Factory function to create and initialize an async audio material manager
-
-    Args:
-        milvus_host: Milvus server host
-        milvus_port: Milvus server port
-        collection_name: Name of the collection
-        embedding_service: EmbeddingService instance
-
-    Returns:
-        Configured and connected AsyncAudioMaterialManager instance
-    """
-    manager = AsyncAudioMaterialManager(
-        milvus_host=milvus_host,
-        milvus_port=milvus_port,
-        collection_name=collection_name,
-        embedding_service=embedding_service
-    )
-    # Auto-connect when creating through factory
-    await manager.connect()
-    return manager
+        if self.client:
+            await self.client.close()
+            self.client = None
+            logger.info("Disconnected from Milvus")

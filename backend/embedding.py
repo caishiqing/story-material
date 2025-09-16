@@ -19,6 +19,7 @@ class EmbeddingService:
     def __init__(
         self,
         model_path: str = "multilingual-e5-large-instruct",
+        dimensions: int = 1024,
         device: Optional[str] = None
     ):
         """
@@ -29,6 +30,7 @@ class EmbeddingService:
             device: Device to run the model on ('cpu', 'cuda', 'mps')
         """
         self.model_path = model_path
+        self.dimensions = dimensions
         self.device = device or self._get_best_device()
 
         # Setup logging (using loguru global logger)

@@ -5,3 +5,6 @@ pydantic
 fastapi
 uvicorn
 loguru
+python-multipart
+requests
+PyYAML
