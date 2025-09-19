@@ -39,9 +39,17 @@
                         <input type="text" id="tagFilter" placeholder="输入标签关键词...">
                     </div>
                     
+                    <div class="filter-group duration-filter">
+                        <div class="duration-inputs">
+                            <input type="number" id="minDurationFilter" placeholder="最小时长（秒）" min="0" step="1">
+                            <span class="duration-separator">-</span>
+                            <input type="number" id="maxDurationFilter" placeholder="最大时长（秒）" min="0" step="1">
+                        </div>
+                    </div>
+                    
                     <div class="filter-group">
                         <div class="search-input-group">
-                            <input type="text" id="searchQuery" placeholder="搜索描述内容...">
+                            <input type="text" id="searchQuery" placeholder="输入搜索内容...">
                             <button id="searchBtn" class="btn btn-sm search-btn">
                                 <i class="fas fa-search"></i>
                             </button>
@@ -113,6 +121,45 @@
                     <div id="loadingState" class="loading-state">
                         <i class="fas fa-spinner fa-spin"></i>
                         <p>加载中...</p>
+                    </div>
+                    
+                    <!-- Pagination -->
+                    <div id="paginationContainer" class="pagination-container" style="display: none;">
+                        <div class="pagination-wrapper">
+                            <div class="pagination-info">
+                                <span id="paginationInfo">显示第 1-20 项，共 0 项</span>
+                            </div>
+                            
+                            <div class="pagination-controls">
+                                <button id="firstPageBtn" class="pagination-btn" title="首页">
+                                    <i class="fas fa-angle-double-left"></i>
+                                </button>
+                                <button id="prevPageBtn" class="pagination-btn" title="上一页">
+                                    <i class="fas fa-angle-left"></i>
+                                </button>
+                                
+                                <div class="page-numbers" id="pageNumbers">
+                                    <!-- Page numbers will be generated here -->
+                                </div>
+                                
+                                <button id="nextPageBtn" class="pagination-btn" title="下一页">
+                                    <i class="fas fa-angle-right"></i>
+                                </button>
+                                <button id="lastPageBtn" class="pagination-btn" title="末页">
+                                    <i class="fas fa-angle-double-right"></i>
+                                </button>
+                            </div>
+                            
+                            <div class="pagination-size">
+                                <label for="pageSizeSelect">每页：</label>
+                                <select id="pageSizeSelect">
+                                    <option value="10">10</option>
+                                    <option value="20" selected>20</option>
+                                    <option value="50">50</option>
+                                    <option value="100">100</option>
+                                </select>
+                            </div>
+                        </div>
                     </div>
                 </section>
             </div>

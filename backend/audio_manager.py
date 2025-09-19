@@ -48,16 +48,18 @@ class AsyncAudioMaterialManager:
         """
         self.db_name = db_name
         self.collection_name = collection_name
-        self.client = AsyncMilvusClient(uri=f"http://{milvus_host}:{milvus_port}")
+        self.uri = f"http://{milvus_host}:{milvus_port}"
+        self.client = None
         self.embedding_service = embedding_service or EmbeddingService()
 
     async def connect(self):
         """Connect to Milvus server and initialize collection"""
-        dbs = await self.client.list_databases()
-        if self.db_name not in dbs:
-            await self.client.create_database(self.db_name)
+        dbs = await AsyncMilvusClient(self.uri).list_databases()
 
-        self.client.use_database(self.db_name)
+        if self.db_name not in dbs:
+            await AsyncMilvusClient(self.uri).create_database(self.db_name)
+
+        self.client = AsyncMilvusClient(uri=self.uri, db_name=self.db_name)
 
         collections = await self.client.list_collections()
         if self.collection_name not in collections:
@@ -308,12 +310,6 @@ class AsyncAudioMaterialManager:
             collection_name=self.collection_name
         )
 
-        # Get entity count using proper query method
-        collection_stats = await self.client.get_collection_stats(
-            collection_name=self.collection_name
-        )
-        total_entities = collection_stats.get('row_count', 0)
-
         # Build schema info
         schema_info = {}
         for field in collection_info['fields']:
@@ -322,14 +318,15 @@ class AsyncAudioMaterialManager:
                 "description": field.get('description', '')
             }
 
-        # Get type counts
+        # Get type counts - use the same query for both total count and type counts
         all_records = await self.client.query(
             collection_name=self.collection_name,
             output_fields=["type"],
-            limit=1000
+            limit=10000
         )
+        total_entities = len(all_records)
 
-        # Count by type
+        # Count by type and get actual total count
         type_counts = {}
         for record in all_records:
             audio_type = record.get('type', 'unknown')
@@ -364,20 +361,18 @@ class AsyncAudioMaterialManager:
         logger.info(f"Filter expression: {filter_expr}")
 
         # Generate dense vector for semantic search
-        query_vector = self.embedding_service.encode(search_params.query)
+        task_description = "Given a query, find the most relevant audio from the database, pay attention to the subject, object, gender, emotion and action."
+        query = f"Instruct: {task_description}\nQuery: {search_params.query}"
+        query_vector = self.embedding_service.encode(query)
 
         # Perform hybrid search using AsyncMilvusClient
         search_results = await self.client.search(
             collection_name=self.collection_name,
-            data=[search_params.query, query_vector.tolist()],
-            anns_field=["sparse_vector", "vector"],
+            data=[query_vector.tolist()],
+            anns_field="vector",
             limit=search_params.limit,
             filter=filter_expr,  # Apply filtering
             output_fields=["id", "path", "description", "type", "tag", "duration"],
-            search_params={
-                "sparse": {"params": {"drop_ratio_search": 0.2}},
-                "dense": {"params": {"nprobe": 10}}
-            }
         )
 
         # Convert results to AudioMaterialResponse
@@ -423,8 +418,9 @@ class AsyncAudioMaterialManager:
         """
         conditions = []
 
-        # Type filter (required)
-        conditions.append(f'type == "{search_params.type.value}"')
+        # Type filter
+        if search_params.type:
+            conditions.append(f'type == "{search_params.type.value}"')
 
         # Tag filter (optional) - partial match
         if search_params.tag:

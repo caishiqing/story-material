@@ -25,7 +25,7 @@ class AudioSearchParams(BaseModel):
     """Search parameters for hybrid audio search"""
 
     query: str = Field(..., min_length=1, description="Query text for search (required)")
-    type: AudioType = Field(..., description="Audio effect type filter (required)")
+    type: AudioType = Field(None, description="Audio effect type filter")
     tag: Optional[str] = Field(None, min_length=1, description="Tag filter - partial match")
     min_duration: Optional[int] = Field(None, gt=0, description="Minimum duration in seconds")
     max_duration: Optional[int] = Field(None, gt=0, description="Maximum duration in seconds")
@@ -277,8 +277,8 @@ class AudioMaterial(AudioMaterialBase):
 class AudioMaterialResponse(AudioMaterialBase):
     """Audio material response model - for API responses (no vector field)"""
 
-    # Additional field specific to response
-    id: int = Field(..., description="Audio material ID")
+    # Additional field specific to response - return as string to avoid JavaScript precision issues
+    id: str = Field(..., description="Audio material ID (as string to avoid JS precision loss)")
 
     # Override required fields
     path: str = Field(..., min_length=1, max_length=512, description="Audio file path")
@@ -291,7 +291,7 @@ class AudioMaterialResponse(AudioMaterialBase):
     def from_milvus_result(cls, result: Dict[str, Any]) -> 'AudioMaterialResponse':
         """Create AudioMaterialResponse from Milvus query result"""
         return cls(
-            id=result.get('id'),
+            id=str(result.get('id')),  # Convert to string to avoid JS precision loss
             path=result.get('path'),
             description=result.get('description'),
             type=result.get('type'),
@@ -303,7 +303,7 @@ class AudioMaterialResponse(AudioMaterialBase):
     def from_audio_material(cls, audio: AudioMaterial) -> 'AudioMaterialResponse':
         """Create AudioMaterialResponse from AudioMaterial"""
         return cls(
-            id=audio.id,
+            id=str(audio.id) if audio.id is not None else "0",  # Convert to string
             path=audio.path,
             description=audio.description,
             type=audio.type,

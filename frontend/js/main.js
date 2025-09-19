@@ -18,6 +18,14 @@ class AudioApp {
         this.audioTypes = [];
         this.currentEditingAudio = null;
         this.currentDeletingAudio = null;
+        
+        // Pagination state
+        this.pagination = {
+            currentPage: 1,
+            itemsPerPage: 20,
+            totalItems: 0,
+            totalPages: 0
+        };
     }
 
     /**
@@ -63,13 +71,28 @@ class AudioApp {
         const typeFilter = document.getElementById('typeFilter');
         const tagFilter = document.getElementById('tagFilter');
         const searchQuery = document.getElementById('searchQuery');
+        const minDurationFilter = document.getElementById('minDurationFilter');
+        const maxDurationFilter = document.getElementById('maxDurationFilter');
         const searchBtn = document.getElementById('searchBtn');
         const clearFiltersBtn = document.getElementById('clearFiltersBtn');
 
         if (typeFilter) typeFilter.addEventListener('change', () => this.applyFilters());
         if (tagFilter) tagFilter.addEventListener('input', 
             components.debounce(() => this.applyFilters(), 500));
-        if (searchQuery) searchQuery.addEventListener('input', 
+        if (searchQuery) {
+            // Support Enter key for semantic search
+            searchQuery.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault(); // Prevent form submission
+                    e.stopPropagation(); // Stop event bubbling
+                    console.log('[Search] Enter key pressed - triggering semantic search');
+                    this.performSearch();
+                }
+            });
+        }
+        if (minDurationFilter) minDurationFilter.addEventListener('input', 
+            components.debounce(() => this.applyFilters(), 500));
+        if (maxDurationFilter) maxDurationFilter.addEventListener('input', 
             components.debounce(() => this.applyFilters(), 500));
         if (searchBtn) searchBtn.addEventListener('click', () => this.performSearch());
         if (clearFiltersBtn) clearFiltersBtn.addEventListener('click', () => this.clearFilters());
@@ -93,6 +116,19 @@ class AudioApp {
         // File input change for validation
         const audioFile = document.getElementById('audioFile');
         if (audioFile) audioFile.addEventListener('change', (e) => this.validateUploadFile(e));
+
+        // Pagination controls
+        const firstPageBtn = document.getElementById('firstPageBtn');
+        const prevPageBtn = document.getElementById('prevPageBtn');
+        const nextPageBtn = document.getElementById('nextPageBtn');
+        const lastPageBtn = document.getElementById('lastPageBtn');
+        const pageSizeSelect = document.getElementById('pageSizeSelect');
+
+        if (firstPageBtn) firstPageBtn.addEventListener('click', () => this.goToPage(1));
+        if (prevPageBtn) prevPageBtn.addEventListener('click', () => this.goToPage(this.pagination.currentPage - 1));
+        if (nextPageBtn) nextPageBtn.addEventListener('click', () => this.goToPage(this.pagination.currentPage + 1));
+        if (lastPageBtn) lastPageBtn.addEventListener('click', () => this.goToPage(this.pagination.totalPages));
+        if (pageSizeSelect) pageSizeSelect.addEventListener('change', (e) => this.changePageSize(parseInt(e.target.value)));
     }
 
     /**
@@ -103,6 +139,16 @@ class AudioApp {
             console.log('Loading audios...');
             this.audios = await audioAPI.getAudios();
             this.filteredAudios = [...this.audios];
+            
+            // Debug: Log loaded audios
+            console.log('=== Loaded audios ===');
+            this.audios.forEach((audio, index) => {
+                console.log(`${index + 1}. ID: ${audio.id}, Path: ${audio.path}`);
+            });
+            console.log('=====================');
+            
+            // Initialize pagination and render
+            this.updatePagination();
             this.renderAudios();
             components.hideLoading();
             
@@ -170,6 +216,9 @@ class AudioApp {
                 this.loadStats()
             ]);
             
+            // Adjust pagination after data refresh
+            this.adjustPaginationAfterDataChange();
+            
             components.showToast('数据刷新完成', 'success', 2000);
             
         } catch (error) {
@@ -184,7 +233,28 @@ class AudioApp {
     }
 
     /**
-     * Render audio list
+     * Adjust pagination after data changes (add/edit/delete)
+     */
+    adjustPaginationAfterDataChange() {
+        // Re-apply current filters to update filteredAudios
+        this.filteredAudios = audioAPI.filterAudios(this.audios, this.currentFilters);
+        
+        // Update pagination calculations
+        this.updatePagination();
+        
+        // If current page is beyond available pages, go to last page
+        if (this.pagination.currentPage > this.pagination.totalPages && this.pagination.totalPages > 0) {
+            this.pagination.currentPage = this.pagination.totalPages;
+        }
+        
+        // If no pages available, go to page 1
+        if (this.pagination.totalPages === 0) {
+            this.pagination.currentPage = 1;
+        }
+    }
+
+    /**
+     * Render audio list with pagination
      */
     renderAudios() {
         const container = document.getElementById('audioContainer');
@@ -197,6 +267,7 @@ class AudioApp {
         container.innerHTML = '';
         
         if (this.filteredAudios.length === 0) {
+            this.hidePagination();
             if (this.audios.length === 0) {
                 components.showEmptyState();
             } else {
@@ -217,8 +288,23 @@ class AudioApp {
 
         components.hideEmptyState();
 
-        // Render audio items
-        this.filteredAudios.forEach((audio, index) => {
+        // Update pagination info
+        this.updatePagination();
+
+        // Calculate pagination
+        const startIndex = (this.pagination.currentPage - 1) * this.pagination.itemsPerPage;
+        const endIndex = Math.min(startIndex + this.pagination.itemsPerPage, this.filteredAudios.length);
+        const currentPageAudios = this.filteredAudios.slice(startIndex, endIndex);
+
+        // Show pagination if needed
+        if (this.filteredAudios.length > this.pagination.itemsPerPage) {
+            this.showPagination();
+        } else {
+            this.hidePagination();
+        }
+
+        // Render current page audio items
+        currentPageAudios.forEach((audio, index) => {
             const audioItem = components.createAudioItem(audio, this.currentViewMode);
             
             // Add stagger animation
@@ -229,32 +315,50 @@ class AudioApp {
     }
 
     /**
-     * Apply filters
+     * Apply filters (excluding search query - only for type, tag, and duration filters)
      */
     applyFilters() {
-        // Update filter values
+        // Update filter values (exclude search query for real-time filtering)
         this.currentFilters.type = document.getElementById('typeFilter')?.value || '';
         this.currentFilters.tag = document.getElementById('tagFilter')?.value || '';
-        this.currentFilters.description = document.getElementById('searchQuery')?.value || '';
+        // Don't include description in real-time filtering - only semantic search
+        this.currentFilters.description = '';
+        
+        // Duration filters
+        const minDurationValue = document.getElementById('minDurationFilter')?.value;
+        const maxDurationValue = document.getElementById('maxDurationFilter')?.value;
+        
+        this.currentFilters.minDuration = minDurationValue ? parseInt(minDurationValue, 10) : null;
+        this.currentFilters.maxDuration = maxDurationValue ? parseInt(maxDurationValue, 10) : null;
 
         // Apply filters
         this.filteredAudios = audioAPI.filterAudios(this.audios, this.currentFilters);
         
+        // Reset to first page when filtering
+        this.pagination.currentPage = 1;
+        this.updatePagination();
+        
         // Re-render
         this.renderAudios();
         
-        console.log(`Filtered ${this.audios.length} audios to ${this.filteredAudios.length}`);
+        console.log(`Applied filters: ${this.audios.length} audios filtered to ${this.filteredAudios.length}`);
     }
 
     /**
      * Perform semantic search
      */
     async performSearch() {
+        console.log('[Search] performSearch() method called');
         const query = document.getElementById('searchQuery')?.value?.trim();
+        console.log('[Search] Query:', query);
+        
         if (!query) {
+            console.log('[Search] Empty query - falling back to applyFilters');
             this.applyFilters();
             return;
         }
+        
+        console.log('[Search] Starting semantic search with query:', query);
 
         const searchBtn = document.getElementById('searchBtn');
         const originalContent = searchBtn?.innerHTML;
@@ -270,14 +374,20 @@ class AudioApp {
                 query: query,
                 type: this.currentFilters.type || undefined,
                 tag: this.currentFilters.tag || undefined,
+                min_duration: this.currentFilters.minDuration || undefined,
+                max_duration: this.currentFilters.maxDuration || undefined,
                 limit: 50
             };
 
+            console.log('[Search] Calling backend API with params:', searchParams);
             const results = await audioAPI.searchAudios(searchParams);
+            console.log('[Search] Backend search results:', results.length, 'items');
+            
             this.filteredAudios = results;
+            this.pagination.currentPage = 1; // Reset to first page for search results
             this.renderAudios();
 
-            components.showToast(`找到 ${results.length} 个相关音效`, 'info', 3000);
+            components.showToast(`搜索完成：找到 ${results.length} 个相关音效`, 'success', 3000);
 
         } catch (error) {
             console.error('Search failed:', error);
@@ -300,10 +410,14 @@ class AudioApp {
         const typeFilter = document.getElementById('typeFilter');
         const tagFilter = document.getElementById('tagFilter');
         const searchQuery = document.getElementById('searchQuery');
+        const minDurationFilter = document.getElementById('minDurationFilter');
+        const maxDurationFilter = document.getElementById('maxDurationFilter');
 
         if (typeFilter) typeFilter.value = '';
         if (tagFilter) tagFilter.value = '';
         if (searchQuery) searchQuery.value = '';
+        if (minDurationFilter) minDurationFilter.value = '';
+        if (maxDurationFilter) maxDurationFilter.value = '';
 
         // Reset filter state
         this.currentFilters = {
@@ -316,9 +430,10 @@ class AudioApp {
 
         // Show all audios
         this.filteredAudios = [...this.audios];
+        this.pagination.currentPage = 1; // Reset to first page
         this.renderAudios();
 
-        components.showToast('筛选已清除', 'info', 2000);
+        components.showToast('已清除所有筛选条件', 'info', 2000);
     }
 
     /**
@@ -410,7 +525,7 @@ class AudioApp {
             components.showToast(`音效上传成功: ${result.filename}`, 'success');
             closeUploadModal();
             
-            // Refresh data
+            // Refresh data and stay on appropriate page
             await this.refreshData();
 
         } catch (error) {
@@ -427,9 +542,14 @@ class AudioApp {
      */
     async playAudio(audioId) {
         try {
-            const audio = this.audios.find(a => a.id == audioId);
+            // Debug: Log the input audioId and available audios
+            console.log(`Input audioId: ${audioId} (type: ${typeof audioId})`);
+            console.log('Available audios:', this.audios.map(a => ({ id: a.id, path: a.path })));
+            
+            const audio = this.audios.find(a => String(a.id) === String(audioId));
             if (!audio) {
                 components.showToast('音效不存在', 'error');
+                console.log(`Audio with ID ${audioId} not found!`);
                 return;
             }
 
@@ -465,6 +585,9 @@ class AudioApp {
             const audioPlayer = document.getElementById('audioPlayer');
             const audioURL = audioAPI.getAudioFileURL(audio.path);
             
+            // Debug: Log audio information
+            console.log(`Playing audio ID: ${audioId}, Path: ${audio.path}, URL: ${audioURL}`);
+            
             audioPlayer.src = audioURL;
             audioPlayer.load();
             
@@ -487,7 +610,7 @@ class AudioApp {
      */
     async editAudio(audioId) {
         try {
-            const audio = this.audios.find(a => a.id == audioId);
+            const audio = this.audios.find(a => String(a.id) === String(audioId));
             if (!audio) {
                 components.showToast('音效不存在', 'error');
                 return;
@@ -556,7 +679,7 @@ class AudioApp {
             components.showToast('音效更新成功', 'success');
             closeEditModal();
             
-            // Refresh data
+            // Refresh data and maintain pagination
             await this.refreshData();
 
         } catch (error) {
@@ -572,7 +695,7 @@ class AudioApp {
      */
     async deleteAudio(audioId) {
         try {
-            const audio = this.audios.find(a => a.id == audioId);
+            const audio = this.audios.find(a => String(a.id) === String(audioId));
             if (!audio) {
                 components.showToast('音效不存在', 'error');
                 return;
@@ -609,7 +732,7 @@ class AudioApp {
             components.showToast('音效删除成功', 'success');
             closeDeleteModal();
             
-            // Refresh data
+            // Refresh data and adjust pagination
             await this.refreshData();
 
         } catch (error) {
@@ -618,6 +741,178 @@ class AudioApp {
         } finally {
             components.setButtonLoading(confirmBtn, false);
             this.currentDeletingAudio = null;
+        }
+    }
+
+    /**
+     * Update pagination state and UI
+     */
+    updatePagination() {
+        this.pagination.totalItems = this.filteredAudios.length;
+        this.pagination.totalPages = Math.ceil(this.pagination.totalItems / this.pagination.itemsPerPage);
+        
+        // Ensure current page is valid
+        if (this.pagination.currentPage > this.pagination.totalPages) {
+            this.pagination.currentPage = Math.max(1, this.pagination.totalPages);
+        }
+        
+        this.updatePaginationUI();
+    }
+
+    /**
+     * Update pagination UI elements
+     */
+    updatePaginationUI() {
+        // Update pagination info
+        const startItem = (this.pagination.currentPage - 1) * this.pagination.itemsPerPage + 1;
+        const endItem = Math.min(startItem + this.pagination.itemsPerPage - 1, this.pagination.totalItems);
+        
+        const paginationInfo = document.getElementById('paginationInfo');
+        if (paginationInfo) {
+            if (this.pagination.totalItems === 0) {
+                paginationInfo.textContent = '共 0 项';
+            } else {
+                paginationInfo.textContent = `显示第 ${startItem}-${endItem} 项，共 ${this.pagination.totalItems} 项`;
+            }
+        }
+
+        // Update button states
+        const firstPageBtn = document.getElementById('firstPageBtn');
+        const prevPageBtn = document.getElementById('prevPageBtn');
+        const nextPageBtn = document.getElementById('nextPageBtn');
+        const lastPageBtn = document.getElementById('lastPageBtn');
+
+        const isFirstPage = this.pagination.currentPage === 1;
+        const isLastPage = this.pagination.currentPage === this.pagination.totalPages || this.pagination.totalPages === 0;
+
+        if (firstPageBtn) firstPageBtn.disabled = isFirstPage;
+        if (prevPageBtn) prevPageBtn.disabled = isFirstPage;
+        if (nextPageBtn) nextPageBtn.disabled = isLastPage;
+        if (lastPageBtn) lastPageBtn.disabled = isLastPage;
+
+        // Generate page numbers
+        this.generatePageNumbers();
+    }
+
+    /**
+     * Generate page number buttons
+     */
+    generatePageNumbers() {
+        const pageNumbers = document.getElementById('pageNumbers');
+        if (!pageNumbers) return;
+
+        pageNumbers.innerHTML = '';
+
+        const totalPages = this.pagination.totalPages;
+        const currentPage = this.pagination.currentPage;
+
+        if (totalPages <= 1) return;
+
+        // Calculate which pages to show
+        let startPage = Math.max(1, currentPage - 2);
+        let endPage = Math.min(totalPages, currentPage + 2);
+
+        // Adjust if we're near the beginning or end
+        if (currentPage <= 3) {
+            endPage = Math.min(totalPages, 5);
+        }
+        if (currentPage > totalPages - 3) {
+            startPage = Math.max(1, totalPages - 4);
+        }
+
+        // Add first page and ellipsis if needed
+        if (startPage > 1) {
+            const firstPageNum = this.createPageButton(1);
+            pageNumbers.appendChild(firstPageNum);
+            
+            if (startPage > 2) {
+                const ellipsis = document.createElement('span');
+                ellipsis.className = 'page-ellipsis';
+                ellipsis.textContent = '...';
+                pageNumbers.appendChild(ellipsis);
+            }
+        }
+
+        // Add page numbers
+        for (let i = startPage; i <= endPage; i++) {
+            const pageBtn = this.createPageButton(i);
+            pageNumbers.appendChild(pageBtn);
+        }
+
+        // Add last page and ellipsis if needed
+        if (endPage < totalPages) {
+            if (endPage < totalPages - 1) {
+                const ellipsis = document.createElement('span');
+                ellipsis.className = 'page-ellipsis';
+                ellipsis.textContent = '...';
+                pageNumbers.appendChild(ellipsis);
+            }
+            
+            const lastPageNum = this.createPageButton(totalPages);
+            pageNumbers.appendChild(lastPageNum);
+        }
+    }
+
+    /**
+     * Create page number button
+     */
+    createPageButton(pageNum) {
+        const button = document.createElement('button');
+        button.className = 'page-number';
+        button.textContent = pageNum;
+        button.addEventListener('click', () => this.goToPage(pageNum));
+        
+        if (pageNum === this.pagination.currentPage) {
+            button.classList.add('active');
+        }
+        
+        return button;
+    }
+
+    /**
+     * Go to specific page
+     */
+    goToPage(pageNum) {
+        if (pageNum < 1 || pageNum > this.pagination.totalPages) return;
+        
+        this.pagination.currentPage = pageNum;
+        this.renderAudios();
+        
+        // Scroll to top of audio list
+        const audioList = document.querySelector('.audio-list');
+        if (audioList) {
+            audioList.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+    }
+
+    /**
+     * Change page size
+     */
+    changePageSize(newSize) {
+        this.pagination.itemsPerPage = newSize;
+        this.pagination.currentPage = 1; // Reset to first page
+        this.renderAudios();
+        
+        components.showToast(`每页显示已设置为 ${newSize} 项`, 'info', 2000);
+    }
+
+    /**
+     * Show pagination controls
+     */
+    showPagination() {
+        const paginationContainer = document.getElementById('paginationContainer');
+        if (paginationContainer) {
+            paginationContainer.style.display = 'flex';
+        }
+    }
+
+    /**
+     * Hide pagination controls
+     */
+    hidePagination() {
+        const paginationContainer = document.getElementById('paginationContainer');
+        if (paginationContainer) {
+            paginationContainer.style.display = 'none';
         }
     }
 }

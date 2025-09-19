@@ -3,18 +3,20 @@ FastAPI application for audio material management
 """
 
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException, Depends, status, File, UploadFile, Form
+from fastapi import FastAPI, HTTPException, Depends, status, File, UploadFile, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from loguru import logger
 import os
-import shutil
+import socket
 import json
 import time
 import yaml
+import socket
 from pathlib import Path
 from typing import List, Optional, Dict, Any
+from urllib.parse import quote
 
 from backend.models import (
     AudioType,
@@ -88,8 +90,8 @@ async def lifespan(app: FastAPI):
 
 # Create FastAPI application
 app = FastAPI(
-    title="Audio Material Management API",
-    description="API for managing audio materials with semantic search and metadata",
+    title="Sound Hub API",
+    description="API for managing sound audio materials with semantic search and metadata",
     version="1.0.0",
     docs_url="/docs",
     redoc_url="/redoc",
@@ -317,39 +319,6 @@ async def get_audio_types():
     return [audio_type.value for audio_type in AudioType]
 
 
-@app.post(
-    "/audio/search",
-    response_model=List[AudioMaterialResponse],
-    tags=["Search"],
-    summary="Hybrid search for audio materials"
-)
-async def search_audios(
-    search_params: AudioSearchParams,
-    manager: AsyncAudioMaterialManager = Depends(get_audio_manager)
-):
-    """
-    Perform hybrid search combining BM25 text search and semantic vector search.
-
-    - **query**: Search query text (required)
-    - **type**: Audio effect type filter (required)
-    - **tag**: Tag filter for partial matching (optional)
-    - **min_duration**: Minimum duration in seconds (optional)
-    - **max_duration**: Maximum duration in seconds (optional)
-    - **limit**: Maximum number of results (1-100, default: 10)
-
-    Results are ranked by hybrid relevance combining text similarity and semantic similarity.
-    """
-    try:
-        results = await manager.search(search_params)
-        return results
-    except Exception as e:
-        logger.error(f"Failed to search audio materials: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
-
-
 @app.get(
     "/audio",
     response_model=List[AudioMaterialResponse],
@@ -467,6 +436,108 @@ async def delete_audio(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to delete audio material"
+        )
+
+
+@app.post(
+    "/audio/search",
+    response_model=List[AudioMaterialResponse],
+    tags=["Search"],
+    summary="Hybrid search for audio materials"
+)
+async def search_audios(
+    search_params: AudioSearchParams,
+    manager: AsyncAudioMaterialManager = Depends(get_audio_manager)
+):
+    """
+    Perform hybrid search combining BM25 text search and semantic vector search.
+
+    - **query**: Search query text (required)
+    - **type**: Audio effect type filter (required)
+    - **tag**: Tag filter for partial matching (optional)
+    - **min_duration**: Minimum duration in seconds (optional)
+    - **max_duration**: Maximum duration in seconds (optional)
+    - **limit**: Maximum number of results (1-100, default: 10)
+
+    Results are ranked by hybrid relevance combining text similarity and semantic similarity.
+    """
+    try:
+        results = await manager.search(search_params)
+        return results
+    except Exception as e:
+        logger.error(f"Failed to search audio materials: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+
+
+@app.get(
+    "/audio/{audio_id}/download-url",
+    response_model=dict,
+    tags=["Audio Materials"],
+    summary="Get audio download URL"
+)
+async def get_audio_download_url(
+    audio_id: int,
+    request: Request,
+    manager: AsyncAudioMaterialManager = Depends(get_audio_manager)
+):
+    """
+    Generate download URL for audio material.
+
+    Returns a complete HTTP URL that can be used to download or stream the audio file.
+    The URL includes proper encoding for Chinese characters and special characters.
+    """
+    try:
+        audio = await manager.get(audio_id)
+        if not audio:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Audio material with ID {audio_id} not found"
+            )
+
+        # 生成完整的下载URL
+        # host = os.getenv("BASE_URL", socket.gethostbyname(socket.gethostname()))
+        base_url = f"{request.url.scheme}://{request.url.netloc}"
+
+        # URL编码处理中文路径和特殊字符
+        path_parts = audio.path.split('/')
+        encoded_parts = [quote(part, safe='') for part in path_parts]
+        encoded_path = '/'.join(encoded_parts)
+
+        download_url = f"{base_url}/static/{encoded_path}"
+
+        # 根据文件扩展名确定MIME类型
+        file_extension = Path(audio.path).suffix.lower()
+        content_type_mapping = {
+            '.mp3': 'audio/mpeg',
+            '.wav': 'audio/wav',
+            '.ogg': 'audio/ogg',
+            '.flac': 'audio/flac',
+            '.m4a': 'audio/mp4',
+            '.aac': 'audio/aac',
+            '.wma': 'audio/x-ms-wma'
+        }
+        content_type = content_type_mapping.get(file_extension, 'audio/mpeg')
+
+        return {
+            "audio_id": str(audio_id),
+            "download_url": download_url,
+            "filename": Path(audio.path).name,
+            "content_type": content_type,
+            "file_size_bytes": None,  # 可以后续添加文件大小检测
+            "description": audio.description,
+            "duration": audio.duration
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to generate download URL for audio {audio_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to generate download URL"
         )
 
 

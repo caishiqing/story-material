@@ -147,8 +147,10 @@ class UIComponents {
         item.className = 'audio-item fade-in';
         item.dataset.audioId = audio.id;
         
+        // Debug: Log the audio being created
+        console.log('Creating audio item for:', { id: audio.id, path: audio.path });
+        
         const displayName = audioAPI.getDisplayName(audio.path, audio.description);
-        const filename = audio.path ? audio.path.split('/').pop() : 'unknown';
         const formattedDuration = audioAPI.formatDuration(audio.duration);
         
         // Create tags HTML
@@ -156,33 +158,87 @@ class UIComponents {
             ? audio.tags.map(tag => `<span class="tag">${this.escapeHtml(tag)}</span>`).join('')
             : '<span class="tag">无标签</span>';
 
-        item.innerHTML = `
-            <div class="audio-header">
-                <div>
-                    <div class="audio-path">${this.escapeHtml(filename)}</div>
-                </div>
-                <div class="audio-actions">
-                    <button class="action-btn play" onclick="app.playAudio(${audio.id})" title="播放">
-                        <i class="fas fa-play"></i>
-                    </button>
-                    <button class="action-btn edit" onclick="app.editAudio(${audio.id})" title="编辑">
-                        <i class="fas fa-edit"></i>
-                    </button>
-                    <button class="action-btn delete" onclick="app.deleteAudio(${audio.id})" title="删除">
-                        <i class="fas fa-trash"></i>
-                    </button>
-                </div>
-            </div>
-            
-            <div class="audio-description">${this.escapeHtml(audio.description || '无描述')}</div>
-            
-            <div class="audio-meta">
-                <span class="type-badge ${audio.type}">${this.getTypeDisplayName(audio.type)}</span>
-                <span class="duration">${formattedDuration}</span>
-            </div>
-            
-            <div class="audio-tags">${tagsHtml}</div>
-        `;
+        // Create the HTML structure
+        const audioHeader = document.createElement('div');
+        audioHeader.className = 'audio-header';
+        
+        const headerInfo = document.createElement('div');
+        const audioTitle = document.createElement('div');
+        audioTitle.className = 'audio-title';
+        audioTitle.textContent = displayName;
+        
+        headerInfo.appendChild(audioTitle);
+        
+        const audioActions = document.createElement('div');
+        audioActions.className = 'audio-actions';
+        
+        // Create play button with proper event binding
+        const playBtn = document.createElement('button');
+        playBtn.className = 'action-btn play';
+        playBtn.title = '播放';
+        playBtn.innerHTML = '<i class="fas fa-play"></i>';
+        playBtn.addEventListener('click', () => {
+            console.log('Play button clicked for audio ID:', audio.id);
+            app.playAudio(String(audio.id));
+        });
+        
+        // Create edit button
+        const editBtn = document.createElement('button');
+        editBtn.className = 'action-btn edit';
+        editBtn.title = '编辑';
+        editBtn.innerHTML = '<i class="fas fa-edit"></i>';
+        editBtn.addEventListener('click', () => {
+            console.log('Edit button clicked for audio ID:', audio.id);
+            app.editAudio(String(audio.id));
+        });
+        
+        // Create delete button
+        const deleteBtn = document.createElement('button');
+        deleteBtn.className = 'action-btn delete';
+        deleteBtn.title = '删除';
+        deleteBtn.innerHTML = '<i class="fas fa-trash"></i>';
+        deleteBtn.addEventListener('click', () => {
+            console.log('Delete button clicked for audio ID:', audio.id);
+            app.deleteAudio(String(audio.id));
+        });
+        
+        audioActions.appendChild(playBtn);
+        audioActions.appendChild(editBtn);
+        audioActions.appendChild(deleteBtn);
+        
+        audioHeader.appendChild(headerInfo);
+        audioHeader.appendChild(audioActions);
+        
+        // Create description
+        const audioDescription = document.createElement('div');
+        audioDescription.className = 'audio-description';
+        audioDescription.textContent = audio.description || '无描述';
+        
+        // Create meta info
+        const audioMeta = document.createElement('div');
+        audioMeta.className = 'audio-meta';
+        
+        const typeBadge = document.createElement('span');
+        typeBadge.className = `type-badge ${audio.type}`;
+        typeBadge.textContent = this.getTypeDisplayName(audio.type);
+        
+        const duration = document.createElement('span');
+        duration.className = 'duration';
+        duration.textContent = formattedDuration;
+        
+        audioMeta.appendChild(typeBadge);
+        audioMeta.appendChild(duration);
+        
+        // Create tags
+        const audioTags = document.createElement('div');
+        audioTags.className = 'audio-tags';
+        audioTags.innerHTML = tagsHtml;
+        
+        // Assemble the item
+        item.appendChild(audioHeader);
+        item.appendChild(audioDescription);
+        item.appendChild(audioMeta);
+        item.appendChild(audioTags);
         
         return item;
     }

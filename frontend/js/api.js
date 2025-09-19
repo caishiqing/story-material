@@ -282,9 +282,13 @@ class AudioAPI {
             return audioPath;
         }
         
-        // For local file paths, we need to serve them through the backend
-        // This might need adjustment based on how the backend serves files
-        return `${this.baseURL}/static/${audioPath}`;
+        // For local file paths, encode the path and serve them through the backend
+        // URL encode each part of the path separately to handle Chinese characters
+        const pathParts = audioPath.split('/');
+        const encodedParts = pathParts.map(part => encodeURIComponent(part));
+        const encodedPath = encodedParts.join('/');
+        
+        return `${this.baseURL}/static/${encodedPath}`;
     }
 
     /**
