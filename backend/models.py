@@ -3,13 +3,16 @@ Data models for audio material management system
 Redesigned with inheritance to eliminate redundancy
 """
 
-from typing import List, Optional, Any, Dict
+from typing import List, Optional, Any, Dict, Union
 from pydantic import BaseModel, Field, field_validator, model_validator
 from enum import Enum
 import numpy as np
 from loguru import logger
 import re
 import os
+import uuid
+import time
+import random
 
 
 class AudioType(str, Enum):
@@ -19,6 +22,7 @@ class AudioType(str, Enum):
     MOOD = "mood"
     ACTION = "action"
     TRANSITION = "transition"
+    VOICE = "voice"
 
 
 class AudioSearchParams(BaseModel):
@@ -26,7 +30,7 @@ class AudioSearchParams(BaseModel):
 
     query: str = Field(..., min_length=1, description="Query text for search (required)")
     type: AudioType = Field(None, description="Audio effect type filter")
-    tag: Optional[str] = Field(None, min_length=1, description="Tag filter - partial match")
+    tag: Optional[Union[str, List[str]]] = Field(None, description="Tag filter - single tag or list of tags for matching")
     min_duration: Optional[int] = Field(None, gt=0, description="Minimum duration in seconds")
     max_duration: Optional[int] = Field(None, gt=0, description="Maximum duration in seconds")
     limit: int = Field(10, gt=0, le=100, description="Maximum number of results to return")
@@ -35,9 +39,22 @@ class AudioSearchParams(BaseModel):
     def validate_tag(cls, v):
         """Validate and clean tag filter"""
         if v is not None:
-            v = v.strip()
-            if not v:
-                return None
+            if isinstance(v, str):
+                # Single tag string
+                v = v.strip()
+                if not v:
+                    return None
+            elif isinstance(v, list):
+                # List of tags
+                cleaned_tags = []
+                for tag in v:
+                    if isinstance(tag, str):
+                        clean_tag = tag.strip()
+                        if clean_tag:
+                            cleaned_tags.append(clean_tag)
+                if not cleaned_tags:
+                    return None
+                v = cleaned_tags
         return v
 
     @model_validator(mode='after')
@@ -108,6 +125,9 @@ class AudioMaterialBase(BaseModel):
 class AudioMaterialCreate(AudioMaterialBase):
     """Audio material creation model - only user-provided fields (no auto-generated)"""
 
+    # ID field for manual specification (optional)
+    id: Optional[str] = Field(None, description="Audio material ID (optional, auto-generated if not provided)")
+
     # Override required fields (make them required)
     path: str = Field(..., min_length=1, max_length=512, description="Audio file path")
     description: Optional[str] = Field(None, min_length=1, max_length=2048,
@@ -117,8 +137,14 @@ class AudioMaterialCreate(AudioMaterialBase):
 
     @model_validator(mode='after')
     def auto_initialize_fields(self):
-        """Auto-initialize description and duration if not provided"""
+        """Auto-initialize description, duration and ID if not provided"""
         # Using global loguru logger
+
+        # Auto-generate ID if not provided
+        if self.id is None:
+            # Generate a unique ID based on timestamp and random number
+            self.id = str(uuid.uuid4())
+            logger.info(f"Auto-generated ID: {self.id}")
 
         # Auto-generate description from filename if not provided
         if self.description is None:
@@ -245,7 +271,7 @@ class AudioMaterial(AudioMaterialBase):
     """Complete audio material model including all fields (internal use)"""
 
     # Additional fields specific to this model
-    id: Optional[int] = Field(None, description="Audio material ID (auto-generated)")
+    id: Optional[str] = Field(None, description="Audio material ID (auto-generated)")
     vector: Optional[List[float]] = Field(None, description="Vector embedding (auto-generated)")
 
     # Override required fields
@@ -260,7 +286,7 @@ class AudioMaterial(AudioMaterialBase):
         cls,
         create_data: AudioMaterialCreate,
         vector: Optional[List[float]] = None,
-        audio_id: Optional[int] = None
+        audio_id: Optional[str] = None
     ) -> 'AudioMaterial':
         """Create AudioMaterial from AudioMaterialCreate data"""
         return cls(

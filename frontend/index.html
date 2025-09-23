@@ -89,6 +89,10 @@
                         <h3 id="transitionCount">0</h3>
                         <p>转场音效</p>
                     </div>
+                    <div class="stat-card">
+                        <h3 id="voiceCount">0</h3>
+                        <p>音色</p>
+                    </div>
                 </section>
 
                 <!-- Audio List -->
@@ -192,6 +196,34 @@
                         <option value="mood">氛围音</option>
                         <option value="action">动作音</option>
                         <option value="transition">转场音效</option>
+                        <option value="voice">音色</option>
+                    </select>
+                </div>
+                
+                <div class="form-group" id="audioIdGroup" style="display: none;">
+                    <label for="audioId">音频ID</label>
+                    <input type="text" id="audioId" placeholder="可选，留空将自动生成">
+                    <small class="help-text">音色类型时可指定特定ID，用于音色管理</small>
+                </div>
+                
+                <div class="form-group" id="voiceGenderGroup" style="display: none;">
+                    <label for="voiceGender">性别 *</label>
+                    <select id="voiceGender" required>
+                        <option value="">请选择性别</option>
+                        <option value="male">男性</option>
+                        <option value="female">女性</option>
+                    </select>
+                </div>
+                
+                <div class="form-group" id="voiceAgeGroup" style="display: none;">
+                    <label for="voiceAge">年龄 *</label>
+                    <select id="voiceAge" required>
+                        <option value="">请选择年龄</option>
+                        <option value="童年">童年</option>
+                        <option value="少年">少年</option>
+                        <option value="青年">青年</option>
+                        <option value="成年">成年</option>
+                        <option value="老年">老年</option>
                     </select>
                 </div>
                 
@@ -200,7 +232,7 @@
                     <textarea id="audioDescription" rows="3" placeholder="可选，留空将根据文件名自动生成"></textarea>
                 </div>
                 
-                <div class="form-group">
+                <div class="form-group" id="audioTagsGroup">
                     <label for="audioTags">标签</label>
                     <input type="text" id="audioTags" placeholder="用逗号分隔，如：背景,轻松,钢琴">
                     <small class="help-text">用逗号分隔多个标签</small>
@@ -246,6 +278,28 @@
                         <option value="mood">氛围音</option>
                         <option value="action">动作音</option>
                         <option value="transition">转场音效</option>
+                        <option value="voice">音色</option>
+                    </select>
+                </div>
+                
+                <div class="form-group" id="editVoiceGenderGroup" style="display: none;">
+                    <label for="editVoiceGender">性别 *</label>
+                    <select id="editVoiceGender" required>
+                        <option value="">请选择性别</option>
+                        <option value="male">男性</option>
+                        <option value="female">女性</option>
+                    </select>
+                </div>
+                
+                <div class="form-group" id="editVoiceAgeGroup" style="display: none;">
+                    <label for="editVoiceAge">年龄 *</label>
+                    <select id="editVoiceAge" required>
+                        <option value="">请选择年龄</option>
+                        <option value="童年">童年</option>
+                        <option value="少年">少年</option>
+                        <option value="青年">青年</option>
+                        <option value="成年">成年</option>
+                        <option value="老年">老年</option>
                     </select>
                 </div>
                 
@@ -254,7 +308,7 @@
                     <textarea id="editAudioDescription" rows="3" required></textarea>
                 </div>
                 
-                <div class="form-group">
+                <div class="form-group" id="editAudioTagsGroup">
                     <label for="editAudioTags">标签</label>
                     <input type="text" id="editAudioTags" placeholder="用逗号分隔标签">
                 </div>

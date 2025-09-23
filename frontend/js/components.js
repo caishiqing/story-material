@@ -252,7 +252,8 @@ class UIComponents {
             'ambient': '环境音',
             'mood': '氛围音',
             'action': '动作音',
-            'transition': '转场音效'
+            'transition': '转场音效',
+            'voice': '音色'
         };
         return typeNames[type] || type;
     }
@@ -277,6 +278,7 @@ class UIComponents {
         const moodEl = document.getElementById('moodCount');
         const actionEl = document.getElementById('actionCount');
         const transitionEl = document.getElementById('transitionCount');
+        const voiceEl = document.getElementById('voiceCount');
         
         if (totalEl) totalEl.textContent = stats.total_count || 0;
         if (musicEl) musicEl.textContent = stats.type_counts?.music || 0;
@@ -284,6 +286,7 @@ class UIComponents {
         if (moodEl) moodEl.textContent = stats.type_counts?.mood || 0;
         if (actionEl) actionEl.textContent = stats.type_counts?.action || 0;
         if (transitionEl) transitionEl.textContent = stats.type_counts?.transition || 0;
+        if (voiceEl) voiceEl.textContent = stats.type_counts?.voice || 0;
     }
 
     /**
@@ -518,6 +521,17 @@ window.closeUploadModal = () => {
     components.hideModal('uploadModal');
     components.resetForm('uploadForm');
     components.hideUploadProgress();
+    
+    // Reset voice fields visibility
+    const audioIdGroup = document.getElementById('audioIdGroup');
+    const voiceGenderGroup = document.getElementById('voiceGenderGroup');
+    const voiceAgeGroup = document.getElementById('voiceAgeGroup');
+    const audioTagsGroup = document.getElementById('audioTagsGroup');
+    
+    if (audioIdGroup) audioIdGroup.style.display = 'none';
+    if (voiceGenderGroup) voiceGenderGroup.style.display = 'none';
+    if (voiceAgeGroup) voiceAgeGroup.style.display = 'none';
+    if (audioTagsGroup) audioTagsGroup.style.display = 'block';
 };
 
 window.openEditModal = () => {
@@ -527,6 +541,15 @@ window.openEditModal = () => {
 window.closeEditModal = () => {
     components.hideModal('editModal');
     components.resetForm('editForm');
+    
+    // Reset edit voice fields visibility
+    const editVoiceGenderGroup = document.getElementById('editVoiceGenderGroup');
+    const editVoiceAgeGroup = document.getElementById('editVoiceAgeGroup');
+    const editAudioTagsGroup = document.getElementById('editAudioTagsGroup');
+    
+    if (editVoiceGenderGroup) editVoiceGenderGroup.style.display = 'none';
+    if (editVoiceAgeGroup) editVoiceAgeGroup.style.display = 'none';
+    if (editAudioTagsGroup) editAudioTagsGroup.style.display = 'block';
 };
 
 window.openDeleteModal = () => {

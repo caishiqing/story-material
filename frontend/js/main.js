@@ -117,6 +117,26 @@ class AudioApp {
         const audioFile = document.getElementById('audioFile');
         if (audioFile) audioFile.addEventListener('change', (e) => this.validateUploadFile(e));
 
+        // Audio type change for voice fields visibility
+        const audioType = document.getElementById('audioType');
+        if (audioType) audioType.addEventListener('change', (e) => this.toggleVoiceFields(e));
+        
+        // Edit audio type change for voice fields visibility
+        const editAudioType = document.getElementById('editAudioType');
+        if (editAudioType) editAudioType.addEventListener('change', (e) => this.toggleEditVoiceFields(e));
+        
+        // Voice gender and age change for auto-updating tags
+        const voiceGender = document.getElementById('voiceGender');
+        const voiceAge = document.getElementById('voiceAge');
+        if (voiceGender) voiceGender.addEventListener('change', () => this.updateVoiceTags());
+        if (voiceAge) voiceAge.addEventListener('change', () => this.updateVoiceTags());
+        
+        // Edit voice gender and age change for auto-updating tags
+        const editVoiceGender = document.getElementById('editVoiceGender');
+        const editVoiceAge = document.getElementById('editVoiceAge');
+        if (editVoiceGender) editVoiceGender.addEventListener('change', () => this.updateEditVoiceTags());
+        if (editVoiceAge) editVoiceAge.addEventListener('change', () => this.updateEditVoiceTags());
+
         // Pagination controls
         const firstPageBtn = document.getElementById('firstPageBtn');
         const prevPageBtn = document.getElementById('prevPageBtn');
@@ -454,6 +474,105 @@ class AudioApp {
     }
 
     /**
+     * Toggle voice fields visibility based on audio type selection
+     */
+    toggleVoiceFields(event) {
+        const selectedType = event.target.value;
+        const audioIdGroup = document.getElementById('audioIdGroup');
+        const voiceGenderGroup = document.getElementById('voiceGenderGroup');
+        const voiceAgeGroup = document.getElementById('voiceAgeGroup');
+        const audioTagsGroup = document.getElementById('audioTagsGroup');
+        
+        if (selectedType === 'voice') {
+            // Show voice-specific fields
+            if (audioIdGroup) audioIdGroup.style.display = 'block';
+            if (voiceGenderGroup) voiceGenderGroup.style.display = 'block';
+            if (voiceAgeGroup) voiceAgeGroup.style.display = 'block';
+            // Hide regular tags field for voice
+            if (audioTagsGroup) audioTagsGroup.style.display = 'none';
+        } else {
+            // Hide voice-specific fields
+            if (audioIdGroup) audioIdGroup.style.display = 'none';
+            if (voiceGenderGroup) voiceGenderGroup.style.display = 'none';
+            if (voiceAgeGroup) voiceAgeGroup.style.display = 'none';
+            // Show regular tags field for non-voice
+            if (audioTagsGroup) audioTagsGroup.style.display = 'block';
+            
+            // Clear voice fields when hiding
+            const audioIdInput = document.getElementById('audioId');
+            const voiceGenderSelect = document.getElementById('voiceGender');
+            const voiceAgeSelect = document.getElementById('voiceAge');
+            if (audioIdInput) audioIdInput.value = '';
+            if (voiceGenderSelect) voiceGenderSelect.value = '';
+            if (voiceAgeSelect) voiceAgeSelect.value = '';
+        }
+    }
+
+    /**
+     * Toggle edit voice fields visibility based on audio type selection
+     */
+    toggleEditVoiceFields(event) {
+        const selectedType = event.target.value;
+        const editVoiceGenderGroup = document.getElementById('editVoiceGenderGroup');
+        const editVoiceAgeGroup = document.getElementById('editVoiceAgeGroup');
+        const editAudioTagsGroup = document.getElementById('editAudioTagsGroup');
+        
+        if (selectedType === 'voice') {
+            // Show voice-specific fields
+            if (editVoiceGenderGroup) editVoiceGenderGroup.style.display = 'block';
+            if (editVoiceAgeGroup) editVoiceAgeGroup.style.display = 'block';
+            // Hide regular tags field for voice
+            if (editAudioTagsGroup) editAudioTagsGroup.style.display = 'none';
+        } else {
+            // Hide voice-specific fields
+            if (editVoiceGenderGroup) editVoiceGenderGroup.style.display = 'none';
+            if (editVoiceAgeGroup) editVoiceAgeGroup.style.display = 'none';
+            // Show regular tags field for non-voice
+            if (editAudioTagsGroup) editAudioTagsGroup.style.display = 'block';
+            
+            // Clear voice fields when hiding
+            const editVoiceGenderSelect = document.getElementById('editVoiceGender');
+            const editVoiceAgeSelect = document.getElementById('editVoiceAge');
+            if (editVoiceGenderSelect) editVoiceGenderSelect.value = '';
+            if (editVoiceAgeSelect) editVoiceAgeSelect.value = '';
+        }
+    }
+
+    /**
+     * Update voice tags based on gender and age selection
+     */
+    updateVoiceTags() {
+        const gender = document.getElementById('voiceGender').value;
+        const age = document.getElementById('voiceAge').value;
+        const tagsInput = document.getElementById('audioTags');
+        
+        const tags = [];
+        if (gender) tags.push(gender);
+        if (age) tags.push(age);
+        
+        if (tagsInput) {
+            tagsInput.value = tags.join(', ');
+        }
+    }
+
+    /**
+     * Update edit voice tags based on gender and age selection
+     */
+    updateEditVoiceTags() {
+        const gender = document.getElementById('editVoiceGender').value;
+        const age = document.getElementById('editVoiceAge').value;
+        const tagsInput = document.getElementById('editAudioTags');
+        
+        const tags = [];
+        if (gender) tags.push(gender);
+        if (age) tags.push(age);
+        
+        if (tagsInput) {
+            tagsInput.value = tags.join(', ');
+        }
+    }
+
+    /**
      * Validate upload file
      */
     validateUploadFile(event) {
@@ -482,8 +601,8 @@ class AudioApp {
         const form = event.target;
         const submitBtn = form.querySelector('button[type="submit"]');
         
-        // Validate form
-        const isValid = components.validateForm('uploadForm', {
+        // Prepare validation rules
+        const validationRules = {
             audioFile: { 
                 required: true, 
                 label: '音频文件',
@@ -493,7 +612,17 @@ class AudioApp {
                 }
             },
             audioType: { required: true, label: '音效类型' }
-        });
+        };
+        
+        // Add voice-specific validation if voice type is selected
+        const audioTypeValue = document.getElementById('audioType').value;
+        if (audioTypeValue === 'voice') {
+            validationRules.voiceGender = { required: true, label: '性别' };
+            validationRules.voiceAge = { required: true, label: '年龄' };
+        }
+        
+        // Validate form
+        const isValid = components.validateForm('uploadForm', validationRules);
         
         if (!isValid) return;
 
@@ -504,6 +633,13 @@ class AudioApp {
             const formData = new FormData();
             formData.append('file', document.getElementById('audioFile').files[0]);
             formData.append('audio_type', document.getElementById('audioType').value);
+            
+            // Add audio ID if provided and type is voice
+            const audioType = document.getElementById('audioType').value;
+            const audioId = document.getElementById('audioId').value.trim();
+            if (audioType === 'voice' && audioId) {
+                formData.append('audio_id', audioId);
+            }
             
             const description = document.getElementById('audioDescription').value.trim();
             if (description) {
@@ -623,13 +759,38 @@ class AudioApp {
             document.getElementById('editAudioType').value = audio.type;
             document.getElementById('editAudioDescription').value = audio.description || '';
             
-            // Handle tags
-            const tagsString = audio.tags && audio.tags.length > 0 
-                ? audio.tags.join(', ') : '';
-            document.getElementById('editAudioTags').value = tagsString;
+            // Handle voice-specific fields
+            if (audio.type === 'voice' && audio.tags && audio.tags.length > 0) {
+                // Extract gender and age from tags for voice type
+                const genderOptions = ['male', 'female'];
+                const ageOptions = ['童年', '少年', '青年', '成年', '老年'];
+                
+                const gender = audio.tags.find(tag => genderOptions.includes(tag));
+                const age = audio.tags.find(tag => ageOptions.includes(tag));
+                
+                if (gender) document.getElementById('editVoiceGender').value = gender;
+                if (age) document.getElementById('editVoiceAge').value = age;
+                
+                // Clear tags input for voice type
+                document.getElementById('editAudioTags').value = '';
+            } else {
+                // Handle regular tags for non-voice types
+                const tagsString = audio.tags && audio.tags.length > 0 
+                    ? audio.tags.join(', ') : '';
+                document.getElementById('editAudioTags').value = tagsString;
+                
+                // Clear voice fields
+                document.getElementById('editVoiceGender').value = '';
+                document.getElementById('editVoiceAge').value = '';
+            }
 
             // Show modal
             openEditModal();
+            
+            // Trigger voice field toggle after modal is shown
+            setTimeout(() => {
+                this.toggleEditVoiceFields({ target: { value: audio.type } });
+            }, 50);
 
         } catch (error) {
             console.error('Failed to prepare edit:', error);
@@ -646,11 +807,21 @@ class AudioApp {
         const form = event.target;
         const submitBtn = form.querySelector('button[type="submit"]');
         
-        // Validate form
-        const isValid = components.validateForm('editForm', {
+        // Prepare validation rules
+        const editValidationRules = {
             editAudioType: { required: true, label: '音效类型' },
             editAudioDescription: { required: true, label: '描述' }
-        });
+        };
+        
+        // Add voice-specific validation if voice type is selected
+        const editAudioTypeValue = document.getElementById('editAudioType').value;
+        if (editAudioTypeValue === 'voice') {
+            editValidationRules.editVoiceGender = { required: true, label: '性别' };
+            editValidationRules.editVoiceAge = { required: true, label: '年龄' };
+        }
+        
+        // Validate form
+        const isValid = components.validateForm('editForm', editValidationRules);
         
         if (!isValid) return;
 
@@ -660,12 +831,22 @@ class AudioApp {
             const audioId = document.getElementById('editAudioId').value;
             const type = document.getElementById('editAudioType').value;
             const description = document.getElementById('editAudioDescription').value.trim();
-            const tagsInput = document.getElementById('editAudioTags').value.trim();
             
-            // Parse tags
             let tags = [];
-            if (tagsInput) {
-                tags = tagsInput.split(',').map(tag => tag.trim()).filter(tag => tag);
+            
+            if (type === 'voice') {
+                // For voice type, use gender and age as tags
+                const gender = document.getElementById('editVoiceGender').value;
+                const age = document.getElementById('editVoiceAge').value;
+                
+                if (gender) tags.push(gender);
+                if (age) tags.push(age);
+            } else {
+                // For non-voice types, use regular tags input
+                const tagsInput = document.getElementById('editAudioTags').value.trim();
+                if (tagsInput) {
+                    tags = tagsInput.split(',').map(tag => tag.trim()).filter(tag => tag);
+                }
             }
 
             const updateData = {

@@ -177,21 +177,24 @@ async def add_audio(
     audio_type: str = Form(...),
     description: Optional[str] = Form(None),
     tags: Optional[str] = Form(None),
+    audio_id: Optional[str] = Form(None),
     manager: AsyncAudioMaterialManager = Depends(get_audio_manager)
 ):
     """
     Upload and add a new audio material to the collection.
 
     - **file**: Audio file to upload (required)
-    - **audio_type**: Audio effect type (required, must be one of: music, ambient, mood, action, transition)
+    - **audio_type**: Audio effect type (required, must be one of: music, ambient, mood, action, transition, voice)
     - **description**: Audio description (auto-generated from filename if not provided)
     - **tags**: List of tags as JSON string (optional, e.g., '["tag1", "tag2"]')
+    - **audio_id**: Custom ID for audio material (optional, auto-generated if not provided)
 
     The system will automatically:
     - Save file to data/sound/{type}/ directory
     - Generate description from filename if not provided
     - Detect audio duration from uploaded file
     - Validate duration based on audio type rules
+    - Use audio_id as primary key if provided, otherwise auto-generate
     """
     try:
         # Validate audio type
@@ -249,13 +252,20 @@ async def add_audio(
                 # If not valid JSON, treat as comma-separated string
                 parsed_tags = [tag.strip() for tag in tags.split(",") if tag.strip()]
 
+        # Prepare audio material data
+        audio_data_dict = {
+            "path": str(file_path),
+            "type": audio_type,
+            "description": description,
+            "tags": parsed_tags
+        }
+
+        # Use audio_id as primary key if provided
+        if audio_id:
+            audio_data_dict["id"] = audio_id
+
         # Create audio material data using the saved file path
-        audio_data = AudioMaterialCreate(
-            path=str(file_path),
-            type=audio_type,
-            description=description,
-            tags=parsed_tags
-        )
+        audio_data = AudioMaterialCreate(**audio_data_dict)
 
         # Add to the collection
         audio_id = await manager.add(audio_data)
@@ -348,7 +358,7 @@ async def list_audios(
     summary="Get audio material by ID"
 )
 async def get_audio(
-    audio_id: int,
+    audio_id: str,
     manager: AsyncAudioMaterialManager = Depends(get_audio_manager)
 ):
     """Get a specific audio material by its ID"""
@@ -377,7 +387,7 @@ async def get_audio(
     summary="Update audio material"
 )
 async def update_audio(
-    audio_id: int,
+    audio_id: str,
     update_data: AudioMaterialUpdate,
     manager: AsyncAudioMaterialManager = Depends(get_audio_manager)
 ):
@@ -414,7 +424,7 @@ async def update_audio(
     summary="Delete audio material"
 )
 async def delete_audio(
-    audio_id: int,
+    audio_id: str,
     manager: AsyncAudioMaterialManager = Depends(get_audio_manager)
 ):
     """Delete an audio material by its ID"""
@@ -479,7 +489,7 @@ async def search_audios(
     summary="Get audio download URL"
 )
 async def get_audio_download_url(
-    audio_id: int,
+    audio_id: str,
     request: Request,
     manager: AsyncAudioMaterialManager = Depends(get_audio_manager)
 ):

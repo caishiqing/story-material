@@ -70,9 +70,10 @@ class AsyncAudioMaterialManager:
         schema = AsyncMilvusClient.create_schema()
 
         schema.add_field(field_name="id",
-                         datatype=DataType.INT64,
+                         datatype=DataType.VARCHAR,
+                         max_length=1000,
                          is_primary=True,
-                         auto_id=True)
+                         auto_id=False)
 
         schema.add_field(field_name="path",
                          datatype=DataType.VARCHAR,
@@ -96,26 +97,9 @@ class AsyncAudioMaterialManager:
                          max_length=64,
                          nullable=True)
 
-        analyzer_params = {"type": "chinese"}
-
         schema.add_field(field_name="description",
                          datatype=DataType.VARCHAR,
-                         max_length=2048,
-                         enable_analyzer=True,
-                         enable_match=True,
-                         analyzer_params=analyzer_params)
-
-        schema.add_field(field_name="sparse_vector",
-                         datatype=DataType.SPARSE_FLOAT_VECTOR)
-
-        # Define BM25 function for full-text search
-        bm25_function = Function(
-            name="description_bm25_emb",
-            input_field_names=["description"],
-            output_field_names=["sparse_vector"],
-            function_type=FunctionType.BM25,
-        )
-        schema.add_function(bm25_function)
+                         max_length=2048)
 
         # Create index for dense vector field
         index_params = self.client.prepare_index_params()
@@ -127,13 +111,11 @@ class AsyncAudioMaterialManager:
             params={"nlist": 64, "nprobe": 10}
         )
 
-        # Create index for sparse vector field (BM25)
+        # Create index for type field
         index_params.add_index(
-            field_name="sparse_vector",
-            index_type="SPARSE_INVERTED_INDEX",
-            index_name="sparse_vector_index",
-            metric_type="BM25",
-            params={}
+            field_name="type",
+            index_type="INVERTED",
+            index_name="type_index",
         )
 
         # Create collection using async client
@@ -165,6 +147,7 @@ class AsyncAudioMaterialManager:
 
         # Prepare data for Milvus insertion
         data = [{
+            "id": audio_data.id,  # Use the ID from audio_data (either user-specified or auto-generated)
             "path": audio_data.path,
             "description": audio_data.description,
             "vector": vector.tolist(),
@@ -175,7 +158,8 @@ class AsyncAudioMaterialManager:
 
         result = await self.client.insert(self.collection_name, data=data)
 
-        inserted_id = result['insert_count']  # AsyncMilvusClient returns different format
+        # Return the actual ID that was inserted
+        inserted_id = audio_data.id
         logger.info(f"Successfully added audio material: {audio_data.path} (ID: {inserted_id})")
 
         return str(inserted_id)
@@ -190,9 +174,7 @@ class AsyncAudioMaterialManager:
         Returns:
             True if deletion was successful
         """
-        # Convert to int if string
-        if isinstance(audio_id, str):
-            audio_id = int(audio_id)
+        # Keep audio_id as-is (can be string or int)
 
         # Delete by primary key
         result = await self.client.delete(
@@ -267,9 +249,7 @@ class AsyncAudioMaterialManager:
         Returns:
             AudioMaterialResponse instance or None if not found
         """
-        # Convert to int if string
-        if isinstance(audio_id, str):
-            audio_id = int(audio_id)
+        # Keep audio_id as-is (can be string or int)
 
         records = await self.client.query(
             collection_name=self.collection_name,
@@ -422,10 +402,18 @@ class AsyncAudioMaterialManager:
         if search_params.type:
             conditions.append(f'type == "{search_params.type.value}"')
 
-        # Tag filter (optional) - partial match
+        # Tag filter (optional) - single tag or multiple tags
         if search_params.tag:
-            # Use ARRAY_CONTAINS for array field matching
-            conditions.append(f'ARRAY_CONTAINS(tag, "{search_params.tag}")')
+            if isinstance(search_params.tag, str):
+                # Single tag matching
+                conditions.append(f'ARRAY_CONTAINS(tag, "{search_params.tag}")')
+            elif isinstance(search_params.tag, list):
+                # Multiple tags matching - all tags must be present (AND logic)
+                tag_conditions = []
+                for tag in search_params.tag:
+                    tag_conditions.append(f'ARRAY_CONTAINS(tag, "{tag}")')
+                if tag_conditions:
+                    conditions.append(f'({" AND ".join(tag_conditions)})')
 
         # Duration range filters (optional)
         if search_params.min_duration is not None:
